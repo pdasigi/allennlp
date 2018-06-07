@@ -252,7 +252,9 @@ class WikiTablesDecoderStep(DecoderStep[WikiTablesDecoderState]):
                        new_score: torch.Tensor,
                        action_embedding: torch.Tensor) -> WikiTablesDecoderState:
             batch_index = state.batch_indices[group_index]
+            action_logprob = float((new_score - state.score[group_index]).data)
             new_action_history = state.action_history[group_index] + [action]
+            new_action_logprobs = state.action_logprobs[group_index] + [action_logprob]
             production_rule = state.possible_actions[batch_index][action][0]
             new_grammar_state = state.grammar_state[group_index].take_action(production_rule)
             if state.checklist_state[0] is not None:
@@ -282,6 +284,7 @@ class WikiTablesDecoderStep(DecoderStep[WikiTablesDecoderState]):
                                      state.rnn_state[group_index].encoder_output_mask)
             new_state = WikiTablesDecoderState(batch_indices=[batch_index],
                                                action_history=[new_action_history],
+                                               action_logprobs=[new_action_logprobs],
                                                score=[new_score],
                                                rnn_state=[new_rnn_state],
                                                grammar_state=[new_grammar_state],
@@ -481,6 +484,8 @@ class WikiTablesDecoderStep(DecoderStep[WikiTablesDecoderState]):
                 # regroup them later, as that's a really easy operation.
                 batch_index = state.batch_indices[group_index]
                 new_action_history = state.action_history[group_index] + [action]
+                action_logprob = float(sorted_log_probs[group_index, action_index].data)
+                new_action_logprobs = state.action_logprobs[group_index] + [action_logprob]
                 new_score = state.score[group_index] + sorted_log_probs[group_index, action_index]
 
                 production_rule = state.possible_actions[batch_index][action][0]
@@ -501,6 +506,7 @@ class WikiTablesDecoderStep(DecoderStep[WikiTablesDecoderState]):
                 new_rnn_state = state.rnn_state[group_index]
                 new_state = WikiTablesDecoderState(batch_indices=[batch_index],
                                                    action_history=[new_action_history],
+                                                   action_logprobs=[new_action_logprobs],
                                                    score=[new_score],
                                                    rnn_state=[new_rnn_state],
                                                    grammar_state=[new_grammar_state],

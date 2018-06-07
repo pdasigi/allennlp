@@ -47,6 +47,7 @@ class WikiTablesDecoderState(DecoderState['WikiTablesDecoderState']):
     def __init__(self,
                  batch_indices: List[int],
                  action_history: List[List[int]],
+                 action_logprobs: List[List[float]],
                  score: List[torch.Tensor],
                  rnn_state: List[RnnState],
                  grammar_state: List[GrammarState],
@@ -56,6 +57,7 @@ class WikiTablesDecoderState(DecoderState['WikiTablesDecoderState']):
                  checklist_state: List[ChecklistState] = None,
                  debug_info: List = None) -> None:
         super(WikiTablesDecoderState, self).__init__(batch_indices, action_history, score)
+        self.action_logprobs = action_logprobs
         self.rnn_state = rnn_state
         self.grammar_state = grammar_state
         self.possible_actions = possible_actions
@@ -89,6 +91,8 @@ class WikiTablesDecoderState(DecoderState['WikiTablesDecoderState']):
     def combine_states(cls, states: List['WikiTablesDecoderState']) -> 'WikiTablesDecoderState':
         batch_indices = [batch_index for state in states for batch_index in state.batch_indices]
         action_histories = [action_history for state in states for action_history in state.action_history]
+        all_action_logprobs = [action_logprobs for state in states for action_logprobs in
+                               state.action_logprobs]
         scores = [score for state in states for score in state.score]
         rnn_states = [rnn_state for state in states for rnn_state in state.rnn_state]
         grammar_states = [grammar_state for state in states for grammar_state in state.grammar_state]
@@ -99,6 +103,7 @@ class WikiTablesDecoderState(DecoderState['WikiTablesDecoderState']):
             debug_info = None
         return WikiTablesDecoderState(batch_indices=batch_indices,
                                       action_history=action_histories,
+                                      action_logprobs=all_action_logprobs,
                                       score=scores,
                                       rnn_state=rnn_states,
                                       grammar_state=grammar_states,

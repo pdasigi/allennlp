@@ -103,6 +103,7 @@ class NlvrDirectSemanticParser(NlvrSemanticParser):
 
         initial_state = WikiTablesDecoderState(batch_indices=list(range(batch_size)),
                                                action_history=[[] for _ in range(batch_size)],
+                                               action_logprobs=[[] for _ in range(batch_size)],
                                                score=initial_score_list,
                                                rnn_state=initial_rnn_state,
                                                grammar_state=initial_grammar_state,
@@ -155,11 +156,14 @@ class NlvrDirectSemanticParser(NlvrSemanticParser):
                     new_weights = weights.data
                     model_parameters[name].data.copy_(new_weights)
                 self._loaded_archive = True
+            best_action_logprobs = [best_final_states[i][0].action_logprobs[0] if i in
+                                    best_final_states else [] for i in range(batch_size)]
             for i in range(batch_size):
                 print([self.vocab.get_token_from_index(int(ind), "tokens") for ind in
                        sentence["tokens"][i].data.numpy()])
                 for action_strings in batch_action_strings[i]:
                     print(action_strings)
+                print(best_action_logprobs[i])
                 print()
         return outputs
 
