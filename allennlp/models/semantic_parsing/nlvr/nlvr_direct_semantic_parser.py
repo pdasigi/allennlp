@@ -12,6 +12,7 @@ from allennlp.modules import Attention, TextFieldEmbedder, Seq2SeqEncoder
 from allennlp.nn.decoding import BeamSearch
 from allennlp.nn.decoding.decoder_trainers import MaximumMarginalLikelihood
 from allennlp.models.model import Model
+from allennlp.models.archival import load_archive
 from allennlp.models.semantic_parsing.wikitables.wikitables_decoder_state import WikiTablesDecoderState
 from allennlp.models.semantic_parsing.nlvr.nlvr_semantic_parser import NlvrSemanticParser
 from allennlp.models.semantic_parsing.wikitables.wikitables_decoder_step import WikiTablesDecoderStep
@@ -74,6 +75,7 @@ class NlvrDirectSemanticParser(NlvrSemanticParser):
         self._decoder_beam_search = decoder_beam_search
         self._max_decoding_steps = max_decoding_steps
         self._action_padding_index = -1
+        self._loaded_archive = False
 
     @overrides
     def forward(self,  # type: ignore
@@ -144,6 +146,21 @@ class NlvrDirectSemanticParser(NlvrSemanticParser):
             else:
                 outputs["best_action_strings"] = batch_action_strings
                 outputs["denotations"] = batch_denotations
+        if not self.training:
+            if not self._loaded_archive:
+                archive = load_archive("/tmp/nlvr_bilinear_attention/model.tar.gz")
+                model_parameters = dict(self.named_parameters())
+                archived_parameters = dict(archive.model.named_parameters())
+                for name, weights in archived_parameters.items():
+                    new_weights = weights.data
+                    model_parameters[name].data.copy_(new_weights)
+                self._loaded_archive = True
+            for i in range(batch_size):
+                print([self.vocab.get_token_from_index(int(ind), "tokens") for ind in
+                       sentence["tokens"][i].data.numpy()])
+                for action_strings in batch_action_strings[i]:
+                    print(action_strings)
+                print()
         return outputs
 
     def _update_metrics(self,
@@ -181,7 +198,10 @@ class NlvrDirectSemanticParser(NlvrSemanticParser):
         action_embedding_dim = params.pop_int('action_embedding_dim')
         encoder = Seq2SeqEncoder.from_params(params.pop("encoder"))
         dropout = params.pop_float('dropout', 0.0)
-        input_attention = Attention.from_params(params.pop("attention"))
+        if "attention" in params:
+            input_attention = Attention.from_params(params.pop("attention"))
+        elif "attention_function" in params:
+            input_attention = Attention.from_params(params.pop("attention_function"))
         decoder_beam_search = BeamSearch.from_params(params.pop("decoder_beam_search"))
         max_decoding_steps = params.pop_int("max_decoding_steps")
         params.assert_empty(cls.__name__)

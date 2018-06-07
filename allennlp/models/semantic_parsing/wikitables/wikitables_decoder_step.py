@@ -47,8 +47,8 @@ class WikiTablesDecoderStep(DecoderStep[WikiTablesDecoderState]):
                  action_embedding_dim: int,
                  input_attention: Attention,
                  num_start_types: int,
-                 predict_start_type_separately: bool = True,
-                 add_action_bias: bool = True,
+                 predict_start_type_separately: bool = False,
+                 add_action_bias: bool = False,
                  mixture_feedforward: FeedForward = None,
                  dropout: float = 0.0,
                  unlinked_terminal_indices: List[int] = None) -> None:
