@@ -50,6 +50,7 @@ class NlvrDecoderState(DecoderState['NlvrDecoderState']):
     def __init__(self,
                  batch_indices: List[int],
                  action_history: List[List[int]],
+                 action_logprobs: List[List[float]],
                  score: List[torch.Tensor],
                  rnn_state: List[RnnState],
                  grammar_state: List[GrammarState],
@@ -60,6 +61,7 @@ class NlvrDecoderState(DecoderState['NlvrDecoderState']):
                  label_strings: List[List[str]],
                  checklist_state: List[ChecklistState] = None) -> None:
         super(NlvrDecoderState, self).__init__(batch_indices, action_history, score)
+        self.action_logprobs = action_logprobs
         self.rnn_state = rnn_state
         self.grammar_state = grammar_state
         # Converting None to list of Nones if needed, to simplify state operations.
@@ -96,12 +98,14 @@ class NlvrDecoderState(DecoderState['NlvrDecoderState']):
     def combine_states(cls, states) -> 'NlvrDecoderState':
         batch_indices = [batch_index for state in states for batch_index in state.batch_indices]
         action_histories = [action_history for state in states for action_history in state.action_history]
+        all_action_logprobs = [action_logprobs for state in states for action_logprobs in state.action_logprobs]
         scores = [score for state in states for score in state.score]
         rnn_states = [rnn_state for state in states for rnn_state in state.rnn_state]
         grammar_states = [grammar_state for state in states for grammar_state in state.grammar_state]
         checklist_states = [checklist_state for state in states for checklist_state in state.checklist_state]
         return NlvrDecoderState(batch_indices=batch_indices,
                                 action_history=action_histories,
+                                action_logprobs=all_action_logprobs,
                                 score=scores,
                                 rnn_state=rnn_states,
                                 grammar_state=grammar_states,

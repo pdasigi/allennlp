@@ -99,6 +99,7 @@ class NlvrDirectSemanticParser(NlvrSemanticParser):
 
         initial_state = NlvrDecoderState(batch_indices=list(range(batch_size)),
                                          action_history=[[] for _ in range(batch_size)],
+                                         action_logprobs=[[] for _ in range(batch_size)],
                                          score=initial_score_list,
                                          rnn_state=initial_rnn_state,
                                          grammar_state=initial_grammar_state,
@@ -134,6 +135,8 @@ class NlvrDirectSemanticParser(NlvrSemanticParser):
             if i in best_final_states:
                 best_action_indices = [best_final_states[i][0].action_history[0]]
                 best_action_sequences[i] = best_action_indices
+        best_action_logprobs = [best_final_states[i][0].action_logprobs[0] if i in best_final_states
+                                else [] for i in range(batch_size)]
         batch_action_strings = self._get_action_strings(actions, best_action_sequences)
         batch_denotations = self._get_denotations(batch_action_strings, worlds)
         if target_action_sequences is not None:
@@ -149,6 +152,7 @@ class NlvrDirectSemanticParser(NlvrSemanticParser):
                        sentence["tokens"][i].data.numpy()])
                 for action_strings in batch_action_strings[i]:
                     print(action_strings)
+                print(best_action_logprobs[i])
                 print()
         return outputs
 

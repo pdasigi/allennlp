@@ -404,6 +404,8 @@ class NlvrDecoderStep(DecoderStep[NlvrDecoderState]):
                 action = considered_actions[group_index][action_index]
                 action_embedding = action_embeddings[group_index, action_index, :]
                 new_action_history = state.action_history[group_index] + [action]
+                action_logprob = float((new_score - state.score[group_index]).data)
+                new_action_logprobs = state.action_logprobs[group_index] + [action_logprob]
                 production_rule = state.possible_actions[batch_index][action][0]
                 new_grammar_state = state.grammar_state[group_index].take_action(production_rule)
                 new_rnn_state = RnnState(hidden_state[group_index],
@@ -414,6 +416,7 @@ class NlvrDecoderStep(DecoderStep[NlvrDecoderState]):
                                          state.rnn_state[group_index].encoder_output_mask)
                 new_state = NlvrDecoderState(batch_indices=[batch_index],
                                              action_history=[new_action_history],
+                                             action_logprobs=[new_action_logprobs],
                                              score=[new_score],
                                              rnn_state=[new_rnn_state],
                                              grammar_state=[new_grammar_state],
