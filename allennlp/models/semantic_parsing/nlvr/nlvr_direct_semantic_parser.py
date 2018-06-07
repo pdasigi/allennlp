@@ -143,6 +143,13 @@ class NlvrDirectSemanticParser(NlvrSemanticParser):
         else:
             outputs["best_action_strings"] = batch_action_strings
             outputs["denotations"] = batch_denotations
+        if not self.training:
+            for i in range(batch_size):
+                print([self.vocab.get_token_from_index(int(ind), "tokens") for ind in
+                       sentence["tokens"][i].data.numpy()])
+                for action_strings in batch_action_strings[i]:
+                    print(action_strings)
+                print()
         return outputs
 
     def _update_metrics(self,
