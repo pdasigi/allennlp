@@ -20,6 +20,11 @@ class WikiTablesMmlSemanticParserTest(ModelTestCase):
     def test_model_can_train_save_and_load(self):
         self.ensure_model_can_train_save_and_load(self.param_file)
 
+    @flaky
+    def test_model_with_span_attention_can_train_save_and_load(self):
+        self.ensure_model_can_train_save_and_load(self.FIXTURES_ROOT / "semantic_parsing" / "wikitables" /
+                                                  "experiment-span-attention.json")
+
     def test_model_decode(self):
         params = Params.from_file(self.param_file)
         iterator_params = params['iterator']

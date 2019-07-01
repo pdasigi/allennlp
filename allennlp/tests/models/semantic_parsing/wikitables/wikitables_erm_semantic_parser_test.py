@@ -1,4 +1,4 @@
-# pylint: disable=no-self-use
+# pylint: disable=no-self-use,invalid-name
 from flaky import flaky
 
 from allennlp.common.testing import ModelTestCase
@@ -19,3 +19,10 @@ class WikiTablesVariableFreeErmTest(ModelTestCase):
         # gradient.
         ignore = {'_decoder_step._checklist_multiplier'}
         self.ensure_model_can_train_save_and_load(self.param_file, gradients_to_ignore=ignore)
+
+    @flaky
+    def test_model_with_span_attention_can_train_save_and_load(self):
+        ignore = {'_decoder_step._checklist_multiplier'}
+        self.ensure_model_can_train_save_and_load(self.FIXTURES_ROOT / "semantic_parsing" / "wikitables" /
+                                                  "experiment-erm-span-attention.json",
+                                                  gradients_to_ignore=ignore)

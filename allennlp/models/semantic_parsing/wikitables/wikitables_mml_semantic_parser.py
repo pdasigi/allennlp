@@ -7,6 +7,7 @@ from allennlp.data import Vocabulary
 from allennlp.data.fields.production_rule_field import ProductionRuleArray
 from allennlp.models.model import Model
 from allennlp.modules import Attention, FeedForward, Seq2SeqEncoder, Seq2VecEncoder, TextFieldEmbedder
+from allennlp.modules.span_extractors import SpanExtractor
 from allennlp.state_machines import BeamSearch
 from allennlp.state_machines.states import GrammarBasedState
 from allennlp.state_machines.trainers import MaximumMarginalLikelihood
@@ -46,6 +47,12 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
     attention : ``Attention``
         We compute an attention over the input question at each step of the decoder, using the
         decoder hidden state as the query.  Passed to the transition function.
+    question_span_extractor : ``SpanExtractor``, optional
+        If you want the decoder to attend on spans instead of tokens, you pass a SpanExtractor here.
+        Passed to super class.
+    max_span_length : ``int``, optional
+        If you want the decoder to attend on spans, this is the maximum length of the spans extracted.
+        Passed to super class.
     mixture_feedforward : ``FeedForward``, optional (default=None)
         If given, we'll use this to compute a mixture probability between global actions and linked
         actions given the hidden state at every timestep of decoding, instead of concatenating the
@@ -86,6 +93,8 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                  decoder_beam_search: BeamSearch,
                  max_decoding_steps: int,
                  attention: Attention,
+                 question_span_extractor: SpanExtractor = None,
+                 max_span_length: int = None,
                  mixture_feedforward: FeedForward = None,
                  add_action_bias: bool = True,
                  training_beam_size: int = None,
@@ -100,6 +109,8 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                          encoder=encoder,
                          entity_encoder=entity_encoder,
                          max_decoding_steps=max_decoding_steps,
+                         question_span_extractor=question_span_extractor,
+                         max_span_length=max_span_length,
                          add_action_bias=add_action_bias,
                          use_neighbor_similarity_for_linking=use_similarity,
                          dropout=dropout,

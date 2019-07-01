@@ -10,6 +10,7 @@ from allennlp.data.fields.production_rule_field import ProductionRuleArray
 from allennlp.models.model import Model
 from allennlp.modules import Embedding, Seq2SeqEncoder, Seq2VecEncoder, TextFieldEmbedder, TimeDistributed
 from allennlp.modules.seq2vec_encoders import BagOfEmbeddingsEncoder
+from allennlp.modules.span_extractors import SpanExtractor
 from allennlp.nn import util
 from allennlp.semparse import ParsingError
 from allennlp.semparse.domain_languages.domain_language import ExecutionError
@@ -43,6 +44,13 @@ class WikiTablesSemanticParser(Model):
     max_decoding_steps : ``int``
         When we're decoding with a beam search, what's the maximum number of steps we should take?
         This only applies at evaluation time, not during training.
+    question_span_extractor : ``SpanExtractor``, optional
+        If you want the decoder to attend to spans in the question instead of tokens,
+        pass a span extractor here.
+    max_span_length : ``int``, optional
+        If you are want the decoder to attend on spans, this is the upper limit on the span length. The span
+        lengths will vary from 1 to this value. If this value is larger than the length of a given sequence, we'll
+        use the sequence length instead.
     add_action_bias : ``bool``, optional (default=True)
         If ``True``, we will learn a bias weight for each action that gets used when predicting
         that action, in addition to its embedding.
@@ -71,6 +79,8 @@ class WikiTablesSemanticParser(Model):
                  encoder: Seq2SeqEncoder,
                  entity_encoder: Seq2VecEncoder,
                  max_decoding_steps: int,
+                 question_span_extractor: SpanExtractor = None,
+                 max_span_length: int = None,
                  add_action_bias: bool = True,
                  use_neighbor_similarity_for_linking: bool = False,
                  dropout: float = 0.0,
@@ -79,6 +89,13 @@ class WikiTablesSemanticParser(Model):
         super().__init__(vocab)
         self._question_embedder = question_embedder
         self._encoder = encoder
+        self._question_span_extractor = question_span_extractor
+        if self._question_span_extractor is not None:
+            if self._encoder.get_output_dim() != self._question_span_extractor.get_output_dim():
+                raise RuntimeError("""We use the same attention function for linked and embedded actions.
+                                   Linked actions attend to tokens, and embedded actions attend to spans. So the output
+                                   dimensionalities of the encoder and the span extractor need to be the same.""")
+        self._max_span_length = max_span_length
         self._entity_encoder = TimeDistributed(entity_encoder)
         self._max_decoding_steps = max_decoding_steps
         self._add_action_bias = add_action_bias
@@ -269,7 +286,15 @@ class WikiTablesSemanticParser(Model):
         # of `batch_size` tensors, each of shape `(question_length, encoder_output_dim)`.  Then we
         # won't have to do any index selects, or anything, we'll just do some `torch.cat()`s.
         encoder_output_list = [encoder_outputs[i] for i in range(batch_size)]
-        question_mask_list = [question_mask[i] for i in range(batch_size)]
+        encoder_output_mask_list = [question_mask[i] for i in range(batch_size)]
+        if self._question_span_extractor is None:
+            encoded_spans_list = None
+            encoded_spans_mask_list = None
+        else:
+            # (batch_size, num_spans, span_embedding_dim)
+            encoder_output_spans, span_mask = self._get_encoder_output_spans(encoder_outputs, question_mask)
+            encoded_spans_list = [encoder_output_spans[i] for i in range(batch_size)]
+            encoded_spans_mask_list = [span_mask[i] for i in range(batch_size)]
         initial_rnn_state = []
         for i in range(batch_size):
             initial_rnn_state.append(RnnStatelet(final_encoder_output[i],
@@ -277,7 +302,9 @@ class WikiTablesSemanticParser(Model):
                                                  self._first_action_embedding,
                                                  self._first_attended_question,
                                                  encoder_output_list,
-                                                 question_mask_list))
+                                                 encoder_output_mask_list,
+                                                 encoded_spans_list,
+                                                 encoded_spans_mask_list))
         initial_grammar_state = [self._create_grammar_state(world[i],
                                                             actions[i],
                                                             linking_scores[i],
@@ -291,6 +318,37 @@ class WikiTablesSemanticParser(Model):
                 outputs['feature_scores'] = feature_scores
             outputs['similarity_scores'] = question_entity_similarity_max_score
         return initial_rnn_state, initial_grammar_state
+
+    def _get_encoder_output_spans(self,
+                                  encoder_output: torch.Tensor,
+                                  question_mask: torch.LongTensor) -> Tuple[torch.FloatTensor,
+                                                                            torch.LongTensor]:
+        _, sequence_length, _ = encoder_output.shape
+        max_span_length = min(self._max_span_length, sequence_length)
+        # Assuming left-padding, these are the indices of the first non-padding tokens in the sequences in the
+        # batch.
+        # (batch_size,)
+        sequence_begin_indices = sequence_length - question_mask.sum(1)
+        span_indices = []
+        span_indices_mask = []
+        for begin_index in sequence_begin_indices:
+            sequence_begin_index = int(begin_index.cpu().detach())
+            span_indices.append([])
+            span_indices_mask.append([])
+            # Span indices are inclusive.
+            for span_begin in range(sequence_length):
+                for span_end in range(span_begin, min(span_begin + max_span_length, sequence_length)):
+                    span_indices[-1].append([span_begin, span_end])
+                    # If the end index is of padding, we can ignore that span.
+                    if span_end < sequence_begin_index:
+                        span_indices_mask[-1].append(0)
+                    else:
+                        span_indices_mask[-1].append(1)
+
+        span_indices_tensor = encoder_output.new_tensor(span_indices, dtype=torch.long)
+        encoder_output_spans = self._question_span_extractor(encoder_output, span_indices_tensor)
+        span_indices_mask_tensor = encoder_output.new_tensor(span_indices_mask, dtype=torch.long)
+        return encoder_output_spans, span_indices_mask_tensor
 
     @staticmethod
     def _get_neighbor_indices(worlds: List[WikiTablesLanguage],

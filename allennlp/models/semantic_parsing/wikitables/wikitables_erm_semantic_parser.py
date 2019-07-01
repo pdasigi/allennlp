@@ -13,6 +13,7 @@ from allennlp.models.model import Model
 from allennlp.models.semantic_parsing.wikitables.wikitables_semantic_parser import WikiTablesSemanticParser
 from allennlp.modules import Attention, FeedForward, Seq2SeqEncoder, Seq2VecEncoder, TextFieldEmbedder
 from allennlp.state_machines import BeamSearch
+from allennlp.modules.span_extractors import SpanExtractor
 from allennlp.state_machines.states import CoverageState, ChecklistStatelet
 from allennlp.state_machines.trainers import ExpectedRiskMinimization
 from allennlp.state_machines.transition_functions import LinkingCoverageTransitionFunction
@@ -51,6 +52,17 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
     max_decoding_steps : ``int``
         Maximum number of steps the decoder should take before giving up. Used both during training
         and evaluation. Passed to super class.
+    question_span_extractor : ``SpanExtractor``, optional
+        If you want the decoder to attend on spans instead of tokens, you pass a SpanExtractor here.
+        Passed to super class.
+    max_span_length : ``int``, optional
+        If you want the decoder to attend on spans, this is the maximum length of the spans extracted.
+        Passed to super class.
+    mixture_feedforward : ``FeedForward``, optional (default=None)
+        If given, we'll use this to compute a mixture probability between global actions and linked
+        actions given the hidden state at every timestep of decoding, instead of concatenating the
+        logits for both (where the logits may not be compatible with each other).  Passed to
+        the transition function.
     add_action_bias : ``bool``, optional (default=True)
         If ``True``, we will learn a bias weight for each action that gets used when predicting
         that action, in addition to its embedding.  Passed to super class.
@@ -93,6 +105,8 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
                  decoder_beam_size: int,
                  decoder_num_finished_states: int,
                  max_decoding_steps: int,
+                 question_span_extractor: SpanExtractor = None,
+                 max_span_length: int = None,
                  mixture_feedforward: FeedForward = None,
                  add_action_bias: bool = True,
                  normalize_beam_score_by_length: bool = False,
@@ -109,6 +123,8 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
                          encoder=encoder,
                          entity_encoder=entity_encoder,
                          max_decoding_steps=max_decoding_steps,
+                         question_span_extractor=question_span_extractor,
+                         max_span_length=max_span_length,
                          add_action_bias=add_action_bias,
                          use_neighbor_similarity_for_linking=use_similarity,
                          dropout=dropout,

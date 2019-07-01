@@ -64,6 +64,7 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         # action embedding, and we'll project that down to the decoder's `input_dim`, which we
         # arbitrarily set to be the same as `output_dim`.
         self._input_projection_layer = Linear(output_dim + action_embedding_dim, input_dim)
+
         # Before making a prediction, we'll compute an attention over the input given our updated
         # hidden state. Then we concatenate those with the decoder state and project to
         # `action_embedding_dim` to make a prediction.
@@ -136,17 +137,30 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         # (group_size, encoder_output_dim)
         encoder_outputs = torch.stack([state.rnn_state[0].encoder_outputs[i] for i in state.batch_indices])
         encoder_output_mask = torch.stack([state.rnn_state[0].encoder_output_mask[i] for i in state.batch_indices])
+        if state.rnn_state[0].encoded_spans is not None:
+            encoded_spans = torch.stack([state.rnn_state[0].encoded_spans[i] for i in state.batch_indices])
+            encoded_spans_mask = torch.stack([state.rnn_state[0].encoded_spans_mask[i]
+                                              for i in state.batch_indices])
+        else:
+            encoded_spans = None
+            encoded_spans_mask = None
 
         if self._num_layers > 1:
-            attended_question, attention_weights = self.attend_on_question(hidden_state[-1],
-                                                                           encoder_outputs,
-                                                                           encoder_output_mask)
-            action_query = torch.cat([hidden_state[-1], attended_question], dim=-1)
+            hidden_state_for_attention = hidden_state[-1]
         else:
-            attended_question, attention_weights = self.attend_on_question(hidden_state,
-                                                                           encoder_outputs,
-                                                                           encoder_output_mask)
-            action_query = torch.cat([hidden_state, attended_question], dim=-1)
+            hidden_state_for_attention = hidden_state
+
+        attention_info = self.attend_on_question(hidden_state_for_attention,
+                                                 encoder_outputs,
+                                                 encoder_output_mask,
+                                                 encoded_spans,
+                                                 encoded_spans_mask)
+        attended_question, attention_weights, span_attended_question, span_attention_weights = attention_info
+        if span_attended_question is None:
+            action_query = torch.cat([hidden_state_for_attention, attended_question], dim=-1)
+        else:
+            # If possible, we use span-based attention.
+            action_query = torch.cat([hidden_state_for_attention, span_attended_question], dim=-1)
 
         # (group_size, action_embedding_dim)
         projected_query = self._activation(self._output_projection_layer(action_query))
@@ -162,6 +176,7 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                 'memory_cell': memory_cell,
                 'attended_question': attended_question,
                 'attention_weights': attention_weights,
+                'span_attention_weights': span_attention_weights,
                 'predicted_action_embeddings': predicted_action_embeddings,
                 }
 
@@ -251,6 +266,8 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                     considered_actions = actions
                     probabilities = current_log_probs.exp().cpu()
                     break
+            # TODO (pradeep): We may need ``span_attention_weights`` from the ``updated_rnn_state``
+            # for visualization.
             return state.new_state_from_group_index(group_index,
                                                     action,
                                                     new_score,
@@ -302,7 +319,12 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
     def attend_on_question(self,
                            query: torch.Tensor,
                            encoder_outputs: torch.Tensor,
-                           encoder_output_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                           encoder_output_mask: torch.Tensor,
+                           encoded_spans: torch.Tensor = None,
+                           encoded_spans_mask: torch.Tensor = None) -> Tuple[torch.Tensor,
+                                                                             torch.Tensor,
+                                                                             torch.Tensor,
+                                                                             torch.Tensor]:
         """
         Given a query (which is typically the decoder hidden state), compute an attention over the
         output of the question encoder, and return a weighted sum of the question representations
@@ -318,4 +340,14 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                                            encoder_output_mask)
         # (group_size, encoder_output_dim)
         attended_question = util.weighted_sum(encoder_outputs, question_attention_weights)
-        return attended_question, question_attention_weights
+
+        question_span_attention_weights = None
+        span_based_attended_question = None
+        if encoded_spans is not None:
+            # This means we want to attend over spans as well.
+            question_span_attention_weights = self._input_attention(query,
+                                                                    encoded_spans,
+                                                                    encoded_spans_mask)
+            span_based_attended_question = util.weighted_sum(encoded_spans, question_span_attention_weights)
+        return (attended_question, question_attention_weights,
+                span_based_attended_question, question_span_attention_weights)
