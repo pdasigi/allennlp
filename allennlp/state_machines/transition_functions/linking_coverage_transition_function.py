@@ -65,7 +65,7 @@ class LinkingCoverageTransitionFunction(CoverageTransitionFunction):
     def _compute_action_probabilities(self,  # type: ignore
                                       state: CoverageState,
                                       hidden_state: torch.Tensor,
-                                      attention_weights: torch.Tensor,
+                                      token_attention_weights: torch.Tensor,
                                       predicted_action_embeddings: torch.Tensor
                                      ) -> Dict[int, List[Tuple[int, Any, Any, Any, List[int]]]]:
         # In this section we take our predicted action embedding and compare it to the available
@@ -106,7 +106,8 @@ class LinkingCoverageTransitionFunction(CoverageTransitionFunction):
                 linking_scores, type_embeddings, linked_actions = instance_actions['linked']
                 action_ids += linked_actions
                 # (num_question_tokens, 1)
-                linked_action_logits = linking_scores.mm(attention_weights[group_index].unsqueeze(-1)).squeeze(-1)
+                linked_action_logits = \
+                        linking_scores.mm(token_attention_weights[group_index].unsqueeze(-1)).squeeze(-1)
 
                 linked_logits_addition = self._get_linked_logits_addition(state.checklist_state[group_index],
                                                                           linked_actions,

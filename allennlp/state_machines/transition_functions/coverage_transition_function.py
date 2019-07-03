@@ -57,7 +57,7 @@ class CoverageTransitionFunction(BasicTransitionFunction):
     def _compute_action_probabilities(self,  # type: ignore
                                       state: CoverageState,
                                       hidden_state: torch.Tensor,
-                                      attention_weights: torch.Tensor,
+                                      token_attention_weights: torch.Tensor,
                                       predicted_action_embeddings: torch.Tensor
                                      ) -> Dict[int, List[Tuple[int, Any, Any, Any, List[int]]]]:
         # In this section we take our predicted action embedding and compare it to the available

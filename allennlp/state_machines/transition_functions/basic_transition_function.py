@@ -94,9 +94,12 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         # being selected.
 
         updated_state = self._update_decoder_state(state)
+        # Note that we're only passing 'token_attention_weights' here, and not the 'span_attention_weights',
+        # because those weights are only used for computing linking scores in the subclasses that do entity
+        # linking, and we do that over tokens.
         batch_results = self._compute_action_probabilities(state,
                                                            updated_state['hidden_state'],
-                                                           updated_state['attention_weights'],
+                                                           updated_state['token_attention_weights'],
                                                            updated_state['predicted_action_embeddings'])
         new_states = self._construct_next_states(state,
                                                  updated_state,
@@ -175,7 +178,7 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                 'hidden_state': hidden_state,
                 'memory_cell': memory_cell,
                 'attended_question': attended_question,
-                'attention_weights': attention_weights,
+                'token_attention_weights': attention_weights,
                 'span_attention_weights': span_attention_weights,
                 'predicted_action_embeddings': predicted_action_embeddings,
                 }
@@ -183,10 +186,11 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
     def _compute_action_probabilities(self,
                                       state: GrammarBasedState,
                                       hidden_state: torch.Tensor,
-                                      attention_weights: torch.Tensor,
+                                      token_attention_weights: torch.Tensor,
                                       predicted_action_embeddings: torch.Tensor
                                      ) -> Dict[int, List[Tuple[int, Any, Any, Any, List[int]]]]:
-        # We take a couple of extra arguments here because subclasses might use them.
+        # We take a couple of extra arguments here because subclasses might use them. For example,
+        # 'token_attention_weights' is used for computing linking probabilities by the 'LinkingTransitionFunction'.
         # pylint: disable=unused-argument,no-self-use
 
         # In this section we take our predicted action embedding and compare it to the available
@@ -259,22 +263,26 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                         action_embedding,
                                         attended_question[group_index],
                                         state.rnn_state[group_index].encoder_outputs,
-                                        state.rnn_state[group_index].encoder_output_mask)
+                                        state.rnn_state[group_index].encoder_output_mask,
+                                        state.rnn_state[group_index].encoded_spans,
+                                        state.rnn_state[group_index].encoded_spans_mask)
             batch_index = state.batch_indices[group_index]
             for i, _, current_log_probs, _, actions in batch_action_probs[batch_index]:
                 if i == group_index:
                     considered_actions = actions
                     probabilities = current_log_probs.exp().cpu()
                     break
-            # TODO (pradeep): We may need ``span_attention_weights`` from the ``updated_rnn_state``
-            # for visualization.
+            if updated_rnn_state['span_attention_weights'] is not None:
+                attention_weights = updated_rnn_state['span_attention_weights']
+            else:
+                attention_weights = updated_rnn_state['token_attention_weights']
             return state.new_state_from_group_index(group_index,
                                                     action,
                                                     new_score,
                                                     new_rnn_state,
                                                     considered_actions,
                                                     probabilities,
-                                                    updated_rnn_state['attention_weights'])
+                                                    attention_weights)
 
         new_states = []
         for _, results in batch_action_probs.items():

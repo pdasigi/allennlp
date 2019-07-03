@@ -74,7 +74,7 @@ class LinkingTransitionFunction(BasicTransitionFunction):
     def _compute_action_probabilities(self,
                                       state: GrammarBasedState,
                                       hidden_state: torch.Tensor,
-                                      attention_weights: torch.Tensor,
+                                      token_attention_weights: torch.Tensor,
                                       predicted_action_embeddings: torch.Tensor
                                      ) -> Dict[int, List[Tuple[int, Any, Any, Any, List[int]]]]:
         # In this section we take our predicted action embedding and compare it to the available
@@ -108,7 +108,8 @@ class LinkingTransitionFunction(BasicTransitionFunction):
                 linking_scores, type_embeddings, linked_actions = instance_actions['linked']
                 action_ids = embedded_actions + linked_actions
                 # (num_question_tokens, 1)
-                linked_action_logits = linking_scores.mm(attention_weights[group_index].unsqueeze(-1)).squeeze(-1)
+                linked_action_logits = \
+                        linking_scores.mm(token_attention_weights[group_index].unsqueeze(-1)).squeeze(-1)
 
                 # The `output_action_embeddings` tensor gets used later as the input to the next
                 # decoder step.  For linked actions, we don't have any action embedding, so we use
