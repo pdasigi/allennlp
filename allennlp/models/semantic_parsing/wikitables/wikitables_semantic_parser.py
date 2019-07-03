@@ -339,8 +339,8 @@ class WikiTablesSemanticParser(Model):
             for span_begin in range(sequence_length):
                 for span_end in range(span_begin, min(span_begin + max_span_length, sequence_length)):
                     span_indices[-1].append([span_begin, span_end])
-                    # If the end index is of padding, we can ignore that span.
-                    if span_end < sequence_begin_index:
+                    # If the begin index is within padding, we can ignore that span.
+                    if span_begin < sequence_begin_index:
                         span_indices_mask[-1].append(0)
                     else:
                         span_indices_mask[-1].append(1)
@@ -741,7 +741,22 @@ class WikiTablesSemanticParser(Model):
                 self._denotation_accuracy(0.0)
 
         if metadata is not None:
-            outputs["question_tokens"] = [x["question_tokens"] for x in metadata]
+            all_question_tokens = [x["question_tokens"] for x in metadata]
+            outputs["question_tokens"] = all_question_tokens
+            if self._max_span_length is not None:
+                # This means we encoded spans, and the decoder attended to them.
+                outputs["question_spans"] = [self._get_span_strings_from_tokens(question_tokens) for
+                                             question_tokens in all_question_tokens]
+
+    def _get_span_strings_from_tokens(self, tokens: List[str]) -> List[str]:
+        max_span_length = min(self._max_span_length, len(tokens))
+        span_strings: List[str] = []
+        for i in range(len(tokens)):
+            for j in range(i + 1, i + max_span_length + 1):
+                if j > len(tokens):
+                    break
+                span_strings.append(" ".join(tokens[i:j]))
+        return span_strings
 
     @overrides
     def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
