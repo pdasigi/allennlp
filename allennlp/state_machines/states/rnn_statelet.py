@@ -48,9 +48,14 @@ class RnnStatelet:
         If you want to attend on encoded spans, you can store them here. We keep this separate from the
         ``encoded_outputs`` field because if you are linking actions to tokens, you will want attention token-level
         attention as well, and it is cleaner to perform two different attention computations instead of extracting
-        one from the other.
+        one from the other. If provided, it should be a list of length ``batch_size``, with each item of shape
+        ``(num_spans, span_embedding_dim)``.
     encoded_spans_mask : ``List[torch.Tensor]``, optional
         Mask over encoded spans to indicate padding. Required only if you're attending to spans.
+    encoded_spans_scores : ``List[torch.Tensor]``, optional
+        Not all spans are created equal. These scores indicate the goodness of spans. Required only if you are
+        encoding spans, and the expected length of the list is ``batch_size``, with each item of shape
+        ``(num_spans,)``.
     """
     def __init__(self,
                  hidden_state: torch.Tensor,
@@ -60,7 +65,8 @@ class RnnStatelet:
                  encoder_outputs: List[torch.Tensor],
                  encoder_output_mask: List[torch.Tensor],
                  encoded_spans: List[torch.Tensor] = None,
-                 encoded_spans_mask: List[torch.Tensor] = None) -> None:
+                 encoded_spans_mask: List[torch.Tensor] = None,
+                 encoded_spans_scores: List[torch.Tensor] = None) -> None:
         self.hidden_state = hidden_state
         self.memory_cell = memory_cell
         self.previous_action_embedding = previous_action_embedding
@@ -69,6 +75,7 @@ class RnnStatelet:
         self.encoder_output_mask = encoder_output_mask
         self.encoded_spans = encoded_spans
         self.encoded_spans_mask = encoded_spans_mask
+        self.encoded_spans_scores = encoded_spans_scores
 
     def __eq__(self, other):
         if isinstance(self, other.__class__):
@@ -82,5 +89,6 @@ class RnnStatelet:
                     util.tensors_equal(self.encoder_output_mask, other.encoder_output_mask, tolerance=1e-5),
                     util.tensors_equal(self.encoded_spans, other.encoded_spans, tolerance=1e-5),
                     util.tensors_equal(self.encoded_spans_mask, other.encoded_spans_mask, tolerance=1e-5),
+                    util.tensors_equal(self.encoded_spans_scores, other.encoded_spans_scores, tolerance=1e-5),
                     ])
         return NotImplemented

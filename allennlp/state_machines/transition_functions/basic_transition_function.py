@@ -144,9 +144,12 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
             encoded_spans = torch.stack([state.rnn_state[0].encoded_spans[i] for i in state.batch_indices])
             encoded_spans_mask = torch.stack([state.rnn_state[0].encoded_spans_mask[i]
                                               for i in state.batch_indices])
+            encoded_spans_scores = torch.stack([state.rnn_state[0].encoded_spans_scores[i]
+                                                for i in state.batch_indices])
         else:
             encoded_spans = None
             encoded_spans_mask = None
+            encoded_spans_scores = None
 
         if self._num_layers > 1:
             hidden_state_for_attention = hidden_state[-1]
@@ -157,7 +160,8 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                                  encoder_outputs,
                                                  encoder_output_mask,
                                                  encoded_spans,
-                                                 encoded_spans_mask)
+                                                 encoded_spans_mask,
+                                                 encoded_spans_scores)
         attended_question, attention_weights, span_attended_question, span_attention_weights = attention_info
         if span_attended_question is None:
             action_query = torch.cat([hidden_state_for_attention, attended_question], dim=-1)
@@ -180,6 +184,7 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                 'attended_question': attended_question,
                 'token_attention_weights': attention_weights,
                 'span_attention_weights': span_attention_weights,
+                'span_scores': encoded_spans_scores,
                 'predicted_action_embeddings': predicted_action_embeddings,
                 }
 
@@ -265,7 +270,8 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                         state.rnn_state[group_index].encoder_outputs,
                                         state.rnn_state[group_index].encoder_output_mask,
                                         state.rnn_state[group_index].encoded_spans,
-                                        state.rnn_state[group_index].encoded_spans_mask)
+                                        state.rnn_state[group_index].encoded_spans_mask,
+                                        state.rnn_state[group_index].encoded_spans_scores)
             batch_index = state.batch_indices[group_index]
             for i, _, current_log_probs, _, actions in batch_action_probs[batch_index]:
                 if i == group_index:
@@ -329,10 +335,11 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                            encoder_outputs: torch.Tensor,
                            encoder_output_mask: torch.Tensor,
                            encoded_spans: torch.Tensor = None,
-                           encoded_spans_mask: torch.Tensor = None) -> Tuple[torch.Tensor,
-                                                                             torch.Tensor,
-                                                                             torch.Tensor,
-                                                                             torch.Tensor]:
+                           encoded_spans_mask: torch.Tensor = None,
+                           encoded_spans_scores: torch.Tensor = None) -> Tuple[torch.Tensor,
+                                                                               torch.Tensor,
+                                                                               torch.Tensor,
+                                                                               torch.Tensor]:
         """
         Given a query (which is typically the decoder hidden state), compute an attention over the
         output of the question encoder, and return a weighted sum of the question representations
@@ -356,6 +363,9 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
             question_span_attention_weights = self._input_attention(query,
                                                                     encoded_spans,
                                                                     encoded_spans_mask)
+            # Reweighting attention using the span scores.
+            question_span_attention_weights = torch.nn.functional.softmax(question_span_attention_weights *
+                                                                          encoded_spans_scores, -1)
             span_based_attended_question = util.weighted_sum(encoded_spans, question_span_attention_weights)
         return (attended_question, question_attention_weights,
                 span_based_attended_question, question_span_attention_weights)

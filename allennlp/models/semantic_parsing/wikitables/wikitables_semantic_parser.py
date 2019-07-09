@@ -90,11 +90,14 @@ class WikiTablesSemanticParser(Model):
         self._question_embedder = question_embedder
         self._encoder = encoder
         self._question_span_extractor = question_span_extractor
+        self._span_scorer = None
         if self._question_span_extractor is not None:
-            if self._encoder.get_output_dim() != self._question_span_extractor.get_output_dim():
+            span_extractor_dim = self._question_span_extractor.get_output_dim()
+            if self._encoder.get_output_dim() != span_extractor_dim:
                 raise RuntimeError("""We use the same attention function for linked and embedded actions.
                                    Linked actions attend to tokens, and embedded actions attend to spans. So the output
                                    dimensionalities of the encoder and the span extractor need to be the same.""")
+            self._span_scorer = torch.nn.Linear(span_extractor_dim, 1)
         self._max_span_length = max_span_length
         self._entity_encoder = TimeDistributed(entity_encoder)
         self._max_decoding_steps = max_decoding_steps
@@ -290,11 +293,16 @@ class WikiTablesSemanticParser(Model):
         if self._question_span_extractor is None:
             encoded_spans_list = None
             encoded_spans_mask_list = None
+            encoded_spans_scores = None
+            encoded_spans_scores_list = None
         else:
             # (batch_size, num_spans, span_embedding_dim)
             encoder_output_spans, span_mask = self._get_encoder_output_spans(encoder_outputs, question_mask)
             encoded_spans_list = [encoder_output_spans[i] for i in range(batch_size)]
             encoded_spans_mask_list = [span_mask[i] for i in range(batch_size)]
+            # (batch_size, num_spans)
+            encoded_spans_scores = torch.tanh(self._span_scorer(encoder_output_spans).squeeze(-1))
+            encoded_spans_scores_list = [encoded_spans_scores[i] for i in range(batch_size)]
         initial_rnn_state = []
         for i in range(batch_size):
             initial_rnn_state.append(RnnStatelet(final_encoder_output[i],
@@ -304,7 +312,8 @@ class WikiTablesSemanticParser(Model):
                                                  encoder_output_list,
                                                  encoder_output_mask_list,
                                                  encoded_spans_list,
-                                                 encoded_spans_mask_list))
+                                                 encoded_spans_mask_list,
+                                                 encoded_spans_scores_list))
         initial_grammar_state = [self._create_grammar_state(world[i],
                                                             actions[i],
                                                             linking_scores[i],
@@ -317,6 +326,8 @@ class WikiTablesSemanticParser(Model):
             if feature_scores is not None:
                 outputs['feature_scores'] = feature_scores
             outputs['similarity_scores'] = question_entity_similarity_max_score
+            if encoded_spans_scores is not None:
+                outputs['question_span_scores'] = encoded_spans_scores
         return initial_rnn_state, initial_grammar_state
 
     def _get_encoder_output_spans(self,
