@@ -301,7 +301,7 @@ class WikiTablesSemanticParser(Model):
             encoded_spans_list = [encoder_output_spans[i] for i in range(batch_size)]
             encoded_spans_mask_list = [span_mask[i] for i in range(batch_size)]
             # (batch_size, num_spans)
-            encoded_spans_scores = torch.tanh(self._span_scorer(encoder_output_spans).squeeze(-1))
+            encoded_spans_scores = torch.sigmoid(self._span_scorer(encoder_output_spans).squeeze(-1))
             encoded_spans_scores_list = [encoded_spans_scores[i] for i in range(batch_size)]
         initial_rnn_state = []
         for i in range(batch_size):
