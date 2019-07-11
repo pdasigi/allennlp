@@ -69,7 +69,6 @@ class RnnStatelet:
                  encoder_output_mask: List[torch.Tensor],
                  encoded_spans: List[torch.Tensor] = None,
                  span_indices: List[torch.Tensor] = None,
-                 encoded_spans_mask: List[torch.Tensor] = None,
                  encoded_spans_scores: List[torch.Tensor] = None) -> None:
         self.hidden_state = hidden_state
         self.memory_cell = memory_cell
@@ -79,7 +78,6 @@ class RnnStatelet:
         self.encoder_output_mask = encoder_output_mask
         self.encoded_spans = encoded_spans
         self.span_indices = span_indices
-        self.encoded_spans_mask = encoded_spans_mask
         self.encoded_spans_scores = encoded_spans_scores
 
     def __eq__(self, other):
@@ -94,7 +92,6 @@ class RnnStatelet:
                     util.tensors_equal(self.encoder_output_mask, other.encoder_output_mask, tolerance=1e-5),
                     util.tensors_equal(self.encoded_spans, other.encoded_spans, tolerance=1e-5),
                     util.tensors_equal(self.span_indices, other.span_indices, tolerance=1e-5),
-                    util.tensors_equal(self.encoded_spans_mask, other.encoded_spans_mask, tolerance=1e-5),
                     util.tensors_equal(self.encoded_spans_scores, other.encoded_spans_scores, tolerance=1e-5),
                     ])
         return NotImplemented

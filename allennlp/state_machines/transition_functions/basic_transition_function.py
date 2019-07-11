@@ -147,12 +147,9 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         encoder_output_mask = torch.stack([state.rnn_state[0].encoder_output_mask[i] for i in state.batch_indices])
         if state.rnn_state[0].encoded_spans is not None:
             encoded_spans = torch.stack([state.rnn_state[0].encoded_spans[i] for i in state.batch_indices])
-            encoded_spans_mask = torch.stack([state.rnn_state[0].encoded_spans_mask[i]
-                                              for i in state.batch_indices])
             span_indices = torch.stack([state.rnn_state[0].span_indices[i] for i in state.batch_indices])
         else:
             encoded_spans = None
-            encoded_spans_mask = None
             span_indices = None
 
         if state.rnn_state[0].encoded_spans_scores is not None:
@@ -178,7 +175,6 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                                  encoder_output_mask,
                                                  encoded_spans,
                                                  span_indices,
-                                                 encoded_spans_mask,
                                                  encoded_spans_scores,
                                                  previous_attention_weights)
         attended_question, attention_weights, span_attended_question, span_attention_weights = attention_info
@@ -290,7 +286,6 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                         state.rnn_state[group_index].encoder_output_mask,
                                         state.rnn_state[group_index].encoded_spans,
                                         state.rnn_state[group_index].span_indices,
-                                        state.rnn_state[group_index].encoded_spans_mask,
                                         state.rnn_state[group_index].encoded_spans_scores)
             batch_index = state.batch_indices[group_index]
             for i, _, current_log_probs, _, actions in batch_action_probs[batch_index]:
@@ -391,7 +386,6 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                            encoder_output_mask: torch.Tensor,
                            encoded_spans: torch.Tensor = None,
                            span_indices: torch.Tensor = None,
-                           encoded_spans_mask: torch.Tensor = None,
                            encoded_spans_scores: torch.Tensor = None,
                            previous_attention_weights: torch.Tensor = None) -> Tuple[torch.Tensor,
                                                                                      torch.Tensor,

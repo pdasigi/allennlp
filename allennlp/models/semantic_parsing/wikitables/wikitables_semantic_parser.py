@@ -303,15 +303,12 @@ class WikiTablesSemanticParser(Model):
         encoded_spans_scores_list = None
         if self._question_span_extractor is None:
             encoded_spans_list = None
-            encoded_spans_mask_list = None
             span_indices_list = None
         else:
             # (batch_size, num_spans, span_embedding_dim)
-            encoder_output_spans, span_indices, span_mask = self._get_encoder_output_spans(encoder_outputs,
-                                                                                           question_mask)
+            encoder_output_spans, span_indices = self._get_encoder_output_spans(encoder_outputs)
             encoded_spans_list = [encoder_output_spans[i] for i in range(batch_size)]
             span_indices_list = [span_indices[i] for i in range(batch_size)]
-            encoded_spans_mask_list = [span_mask[i] for i in range(batch_size)]
             if self._span_scorer is not None:
                 # (batch_size, num_spans)
                 encoded_spans_scores = torch.sigmoid(self._span_scorer(encoder_output_spans).squeeze(-1))
@@ -326,7 +323,6 @@ class WikiTablesSemanticParser(Model):
                                                  encoder_output_mask_list,
                                                  encoded_spans_list,
                                                  span_indices_list,
-                                                 encoded_spans_mask_list,
                                                  encoded_spans_scores_list))
         initial_grammar_state = [self._create_grammar_state(world[i],
                                                             actions[i],
@@ -345,36 +341,21 @@ class WikiTablesSemanticParser(Model):
         return initial_rnn_state, initial_grammar_state
 
     def _get_encoder_output_spans(self,
-                                  encoder_output: torch.Tensor,
-                                  question_mask: torch.LongTensor) -> Tuple[torch.FloatTensor,
-                                                                            torch.LongTensor,
-                                                                            torch.LongTensor]:
-        _, sequence_length, _ = encoder_output.shape
+                                  encoder_output: torch.Tensor) -> Tuple[torch.FloatTensor,
+                                                                         torch.LongTensor]:
+        batch_size, sequence_length, _ = encoder_output.shape
         max_span_length = min(self._max_span_length, sequence_length)
-        # Assuming left-padding, these are the indices of the first non-padding tokens in the sequences in the
-        # batch.
-        # (batch_size,)
-        sequence_begin_indices = sequence_length - question_mask.sum(1)
         span_indices = []
-        span_indices_mask = []
-        for begin_index in sequence_begin_indices:
-            sequence_begin_index = int(begin_index.cpu().detach())
+        for _ in range(batch_size):
             span_indices.append([])
-            span_indices_mask.append([])
             # Span indices are inclusive.
             for span_begin in range(sequence_length):
                 for span_end in range(span_begin, min(span_begin + max_span_length, sequence_length)):
                     span_indices[-1].append([span_begin, span_end])
-                    # If the begin index is within padding, we can ignore that span.
-                    if span_begin < sequence_begin_index:
-                        span_indices_mask[-1].append(0)
-                    else:
-                        span_indices_mask[-1].append(1)
 
         span_indices_tensor = encoder_output.new_tensor(span_indices, dtype=torch.long)
         encoder_output_spans = self._question_span_extractor(encoder_output, span_indices_tensor)
-        span_indices_mask_tensor = encoder_output.new_tensor(span_indices_mask, dtype=torch.long)
-        return encoder_output_spans, span_indices_tensor, span_indices_mask_tensor
+        return encoder_output_spans, span_indices_tensor
 
     @staticmethod
     def _get_neighbor_indices(worlds: List[WikiTablesLanguage],
