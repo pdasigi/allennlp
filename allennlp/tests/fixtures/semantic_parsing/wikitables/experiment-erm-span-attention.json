@@ -30,6 +30,7 @@
       "combination": "x-y"
     },
     "max_span_length": 3,
+    "use_structured_attention": true,
     "entity_encoder": {
       "type": "boe",
       "embedding_dim": 25,

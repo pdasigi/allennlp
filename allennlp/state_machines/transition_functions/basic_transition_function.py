@@ -41,6 +41,9 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
     dropout : ``float`` (optional, default=0.0)
     num_layers: ``int``, (optional, default=1)
         The number of layers in the decoder LSTM.
+    use_structured_attention: ``bool``, (optional, default=False)
+        If set, we will use a gate to update the attention over the question for the given node based on that for
+        its parent node.
     """
     def __init__(self,
                  encoder_output_dim: int,
@@ -49,12 +52,14 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                  activation: Activation = Activation.by_name('relu')(),
                  add_action_bias: bool = True,
                  dropout: float = 0.0,
-                 num_layers: int = 1) -> None:
+                 num_layers: int = 1,
+                 use_structured_attention: bool = False) -> None:
         super().__init__()
         self._input_attention = input_attention
         self._add_action_bias = add_action_bias
         self._activation = activation
         self._num_layers = num_layers
+        self._use_structured_attention = use_structured_attention
 
         # Decoder output dim needs to be the same as the encoder output dim since we initialize the
         # hidden state of the decoder with the final hidden state of the encoder.
@@ -156,12 +161,20 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         else:
             hidden_state_for_attention = hidden_state
 
+        # debug_info is None for the initial state when there is no previous attention.
+        previous_attention_weights = None
+        # TODO (pradeep): debug_info is an optional field. The following computation should not rely on it being
+        # present.
+        if state.debug_info is not None:
+            # TODO (pradeep): Get previous attention weights from the appropriate decoder state here.
+            pass
         attention_info = self.attend_on_question(hidden_state_for_attention,
                                                  encoder_outputs,
                                                  encoder_output_mask,
                                                  encoded_spans,
                                                  encoded_spans_mask,
-                                                 encoded_spans_scores)
+                                                 encoded_spans_scores,
+                                                 previous_attention_weights)
         attended_question, attention_weights, span_attended_question, span_attention_weights = attention_info
         if span_attended_question is None:
             action_query = torch.cat([hidden_state_for_attention, attended_question], dim=-1)
@@ -336,10 +349,11 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                            encoder_output_mask: torch.Tensor,
                            encoded_spans: torch.Tensor = None,
                            encoded_spans_mask: torch.Tensor = None,
-                           encoded_spans_scores: torch.Tensor = None) -> Tuple[torch.Tensor,
-                                                                               torch.Tensor,
-                                                                               torch.Tensor,
-                                                                               torch.Tensor]:
+                           encoded_spans_scores: torch.Tensor = None,
+                           previous_attention_weights: torch.Tensor = None) -> Tuple[torch.Tensor,
+                                                                                     torch.Tensor,
+                                                                                     torch.Tensor,
+                                                                                     torch.Tensor]:
         """
         Given a query (which is typically the decoder hidden state), compute an attention over the
         output of the question encoder, and return a weighted sum of the question representations
@@ -360,12 +374,19 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         span_based_attended_question = None
         if encoded_spans is not None:
             # This means we want to attend over spans as well.
+            # (group_size, num_spans)
             question_span_attention_weights = self._input_attention(query,
                                                                     encoded_spans,
                                                                     encoded_spans_mask)
-            # Reweighting attention using the span scores.
-            question_span_attention_weights = torch.nn.functional.softmax(question_span_attention_weights *
-                                                                          encoded_spans_scores, -1)
+            # Scaling using span scores.
+            question_span_attention_weights = question_span_attention_weights * encoded_spans_scores
+            if self._use_structured_attention and previous_attention_weights is not None:
+                # Scaling using previous state's attention.
+                question_span_attention_weights = question_span_attention_weights * previous_attention_weights
+
+            # Renormalizing
+            question_span_attention_weights = torch.nn.functional.softmax(question_span_attention_weights, -1)
+            # (group_size, span_output_dim)
             span_based_attended_question = util.weighted_sum(encoded_spans, question_span_attention_weights)
         return (attended_question, question_attention_weights,
                 span_based_attended_question, question_span_attention_weights)

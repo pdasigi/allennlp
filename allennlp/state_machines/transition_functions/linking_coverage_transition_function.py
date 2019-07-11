@@ -37,6 +37,9 @@ class LinkingCoverageTransitionFunction(CoverageTransitionFunction):
         gets used when predicting the next action.  We add a dimension of ones to our predicted
         action vector in this case to account for that.
     dropout : ``float`` (optional, default=0.0)
+    use_structured_attention: ``bool`` (optional, default=False)
+        If set, we'll update the attention over the question for producing the current rule, conditioned on that of
+        the parent node.
     """
     def __init__(self,
                  encoder_output_dim: int,
@@ -45,13 +48,15 @@ class LinkingCoverageTransitionFunction(CoverageTransitionFunction):
                  activation: Activation = Activation.by_name('relu')(),
                  add_action_bias: bool = True,
                  mixture_feedforward: FeedForward = None,
-                 dropout: float = 0.0) -> None:
+                 dropout: float = 0.0,
+                 use_structured_attention: bool = False) -> None:
         super().__init__(encoder_output_dim=encoder_output_dim,
                          action_embedding_dim=action_embedding_dim,
                          input_attention=input_attention,
                          activation=activation,
                          add_action_bias=add_action_bias,
-                         dropout=dropout)
+                         dropout=dropout,
+                         use_structured_attention=use_structured_attention)
         self._linked_checklist_multiplier = Parameter(torch.FloatTensor([1.0]))
         self._mixture_feedforward = mixture_feedforward
 

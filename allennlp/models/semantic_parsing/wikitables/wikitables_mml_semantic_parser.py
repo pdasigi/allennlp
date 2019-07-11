@@ -83,6 +83,9 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
         The vocabulary namespace to use for production rules.  The default corresponds to the
         default used in the dataset reader, so you likely don't need to modify this. Passed to super
         class.
+    use_structured_attention : ``bool``, optional (default=False)
+        If set, we will condition the attention in the transition function on that for predicting the parent node.
+        Passed to the super class.
     """
     def __init__(self,
                  vocab: Vocabulary,
@@ -101,7 +104,8 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                  use_neighbor_similarity_for_linking: bool = False,
                  dropout: float = 0.0,
                  num_linking_features: int = 10,
-                 rule_namespace: str = 'rule_labels') -> None:
+                 rule_namespace: str = 'rule_labels',
+                 use_structured_attention: bool = False) -> None:
         use_similarity = use_neighbor_similarity_for_linking
         super().__init__(vocab=vocab,
                          question_embedder=question_embedder,
@@ -115,7 +119,8 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                          use_neighbor_similarity_for_linking=use_similarity,
                          dropout=dropout,
                          num_linking_features=num_linking_features,
-                         rule_namespace=rule_namespace)
+                         rule_namespace=rule_namespace,
+                         use_structured_attention=use_structured_attention)
         self._beam_search = decoder_beam_search
         self._decoder_trainer = MaximumMarginalLikelihood(training_beam_size)
         self._decoder_step = LinkingTransitionFunction(encoder_output_dim=self._encoder.get_output_dim(),
@@ -123,7 +128,8 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                                                        input_attention=attention,
                                                        add_action_bias=self._add_action_bias,
                                                        mixture_feedforward=mixture_feedforward,
-                                                       dropout=dropout)
+                                                       dropout=dropout,
+                                                       use_structured_attention=self._use_structured_attention)
 
     @overrides
     def forward(self,  # type: ignore
