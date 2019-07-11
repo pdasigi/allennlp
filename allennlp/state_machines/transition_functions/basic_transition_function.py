@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Set, Tuple
 
 from overrides import overrides
 
+import numpy
 import torch
 from torch.nn.modules.rnn import LSTM, LSTMCell
 from torch.nn.modules.linear import Linear
@@ -368,16 +369,15 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         """
         batch_size, num_elements = data.shape
         _, num_spans, _ = span_indices.shape
+        indices = span_indices.new(numpy.arange(num_elements))
         # Tensor where each row is 0 ... num_elements - 1.
-        all_indices = torch.arange(num_elements).repeat(1, batch_size * num_spans).view(batch_size,
-                                                                                        num_spans,
-                                                                                        num_elements)
+        all_indices = indices.repeat(1, batch_size * num_spans).view(batch_size, num_spans, num_elements)
+
         # Each tensor is of size (batch_size, num_spans, 1)
         start_indices, end_indices = span_indices.split(1, -1)
-        mask = (all_indices >= start_indices) * (all_indices <= end_indices)
-        mask_tensor = data.new(mask.float())
+        mask = ((all_indices >= start_indices) * (all_indices <= end_indices)).float()
         span_expanded_data = data.repeat(1, num_spans).view(batch_size, num_spans, num_elements)
-        summed_data = (span_expanded_data * mask_tensor).sum(-1)
+        summed_data = (span_expanded_data * mask).sum(-1)
         return summed_data
 
     def attend_on_question(self,
