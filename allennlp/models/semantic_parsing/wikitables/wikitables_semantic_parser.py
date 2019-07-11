@@ -51,6 +51,9 @@ class WikiTablesSemanticParser(Model):
         If you are want the decoder to attend on spans, this is the upper limit on the span length. The span
         lengths will vary from 1 to this value. If this value is larger than the length of a given sequence, we'll
         use the sequence length instead.
+    score_spans: ``bool``, optional (default=False)
+        If set, we will use a linear layer to score extracted spans. If no span extractor is provided this flag
+        will be ignored.
     add_action_bias : ``bool``, optional (default=True)
         If ``True``, we will learn a bias weight for each action that gets used when predicting
         that action, in addition to its embedding.
@@ -84,6 +87,7 @@ class WikiTablesSemanticParser(Model):
                  max_decoding_steps: int,
                  question_span_extractor: SpanExtractor = None,
                  max_span_length: int = None,
+                 score_spans: bool = False,
                  add_action_bias: bool = True,
                  use_neighbor_similarity_for_linking: bool = False,
                  dropout: float = 0.0,
@@ -95,7 +99,7 @@ class WikiTablesSemanticParser(Model):
         self._encoder = encoder
         self._question_span_extractor = question_span_extractor
         self._span_scorer = None
-        if self._question_span_extractor is not None:
+        if self._question_span_extractor is not None and score_spans:
             span_extractor_dim = self._question_span_extractor.get_output_dim()
             if self._encoder.get_output_dim() != span_extractor_dim:
                 raise RuntimeError("""We use the same attention function for linked and embedded actions.
@@ -295,19 +299,23 @@ class WikiTablesSemanticParser(Model):
         # won't have to do any index selects, or anything, we'll just do some `torch.cat()`s.
         encoder_output_list = [encoder_outputs[i] for i in range(batch_size)]
         encoder_output_mask_list = [question_mask[i] for i in range(batch_size)]
+        encoded_spans_scores = None
+        encoded_spans_scores_list = None
         if self._question_span_extractor is None:
             encoded_spans_list = None
             encoded_spans_mask_list = None
-            encoded_spans_scores = None
-            encoded_spans_scores_list = None
+            span_indices_list = None
         else:
             # (batch_size, num_spans, span_embedding_dim)
-            encoder_output_spans, span_mask = self._get_encoder_output_spans(encoder_outputs, question_mask)
+            encoder_output_spans, span_indices, span_mask = self._get_encoder_output_spans(encoder_outputs,
+                                                                                           question_mask)
             encoded_spans_list = [encoder_output_spans[i] for i in range(batch_size)]
+            span_indices_list = [span_indices[i] for i in range(batch_size)]
             encoded_spans_mask_list = [span_mask[i] for i in range(batch_size)]
-            # (batch_size, num_spans)
-            encoded_spans_scores = torch.sigmoid(self._span_scorer(encoder_output_spans).squeeze(-1))
-            encoded_spans_scores_list = [encoded_spans_scores[i] for i in range(batch_size)]
+            if self._span_scorer is not None:
+                # (batch_size, num_spans)
+                encoded_spans_scores = torch.sigmoid(self._span_scorer(encoder_output_spans).squeeze(-1))
+                encoded_spans_scores_list = [encoded_spans_scores[i] for i in range(batch_size)]
         initial_rnn_state = []
         for i in range(batch_size):
             initial_rnn_state.append(RnnStatelet(final_encoder_output[i],
@@ -317,6 +325,7 @@ class WikiTablesSemanticParser(Model):
                                                  encoder_output_list,
                                                  encoder_output_mask_list,
                                                  encoded_spans_list,
+                                                 span_indices_list,
                                                  encoded_spans_mask_list,
                                                  encoded_spans_scores_list))
         initial_grammar_state = [self._create_grammar_state(world[i],
@@ -338,6 +347,7 @@ class WikiTablesSemanticParser(Model):
     def _get_encoder_output_spans(self,
                                   encoder_output: torch.Tensor,
                                   question_mask: torch.LongTensor) -> Tuple[torch.FloatTensor,
+                                                                            torch.LongTensor,
                                                                             torch.LongTensor]:
         _, sequence_length, _ = encoder_output.shape
         max_span_length = min(self._max_span_length, sequence_length)
@@ -364,7 +374,7 @@ class WikiTablesSemanticParser(Model):
         span_indices_tensor = encoder_output.new_tensor(span_indices, dtype=torch.long)
         encoder_output_spans = self._question_span_extractor(encoder_output, span_indices_tensor)
         span_indices_mask_tensor = encoder_output.new_tensor(span_indices_mask, dtype=torch.long)
-        return encoder_output_spans, span_indices_mask_tensor
+        return encoder_output_spans, span_indices_tensor, span_indices_mask_tensor
 
     @staticmethod
     def _get_neighbor_indices(worlds: List[WikiTablesLanguage],

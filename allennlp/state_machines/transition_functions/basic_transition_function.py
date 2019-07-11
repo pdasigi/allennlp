@@ -149,11 +149,16 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
             encoded_spans = torch.stack([state.rnn_state[0].encoded_spans[i] for i in state.batch_indices])
             encoded_spans_mask = torch.stack([state.rnn_state[0].encoded_spans_mask[i]
                                               for i in state.batch_indices])
-            encoded_spans_scores = torch.stack([state.rnn_state[0].encoded_spans_scores[i]
-                                                for i in state.batch_indices])
+            span_indices = torch.stack([state.rnn_state[0].span_indices[i] for i in state.batch_indices])
         else:
             encoded_spans = None
             encoded_spans_mask = None
+            span_indices = None
+
+        if state.rnn_state[0].encoded_spans_scores is not None:
+            encoded_spans_scores = torch.stack([state.rnn_state[0].encoded_spans_scores[i]
+                                                for i in state.batch_indices])
+        else:
             encoded_spans_scores = None
 
         if self._num_layers > 1:
@@ -172,6 +177,7 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                                  encoder_outputs,
                                                  encoder_output_mask,
                                                  encoded_spans,
+                                                 span_indices,
                                                  encoded_spans_mask,
                                                  encoded_spans_scores,
                                                  previous_attention_weights)
@@ -283,6 +289,7 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                         state.rnn_state[group_index].encoder_outputs,
                                         state.rnn_state[group_index].encoder_output_mask,
                                         state.rnn_state[group_index].encoded_spans,
+                                        state.rnn_state[group_index].span_indices,
                                         state.rnn_state[group_index].encoded_spans_mask,
                                         state.rnn_state[group_index].encoded_spans_scores)
             batch_index = state.batch_indices[group_index]
@@ -343,11 +350,47 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                     new_states.append(make_state(group_index, action, log_prob, action_embedding))
         return new_states
 
+    @staticmethod
+    def _compute_span_sum(data: torch.Tensor,
+                          span_indices: torch.LongTensor) -> torch.Tensor:
+        """
+        Given a tensor with some data and another specifying span indices along that the final axis of the data
+        tensor, this function computes the sum of elements in the data tensor that belong to the spans identified
+        by the indices.
+
+        Parameters
+        ----------
+        data : ``torch.Tensor``
+            Tensor of shape ``(batch_size, num_elements)``
+        span_indices : ``torch.LongTensor``
+            Tensor of shape ``(batch_size, num_spans, 2)``, specifying start and end indices that are assumed to be
+            inclusive.
+
+        Returns
+        -------
+        summed_data : ``torch.Tensor``
+            Tensor of shape ``(batch_size, num_spans)``
+        """
+        batch_size, num_elements = data.shape
+        _, num_spans, _ = span_indices.shape
+        # Tensor where each row is 0 ... num_elements - 1.
+        all_indices = torch.arange(num_elements).repeat(1, batch_size * num_spans).view(batch_size,
+                                                                                        num_spans,
+                                                                                        num_elements)
+        # Each tensor is of size (batch_size, num_spans, 1)
+        start_indices, end_indices = span_indices.split(1, -1)
+        mask = (all_indices >= start_indices) * (all_indices <= end_indices)
+        mask_tensor = data.new(mask.float())
+        span_expanded_data = data.repeat(1, num_spans).view(batch_size, num_spans, num_elements)
+        summed_data = (span_expanded_data * mask_tensor).sum(-1)
+        return summed_data
+
     def attend_on_question(self,
                            query: torch.Tensor,
                            encoder_outputs: torch.Tensor,
                            encoder_output_mask: torch.Tensor,
                            encoded_spans: torch.Tensor = None,
+                           span_indices: torch.Tensor = None,
                            encoded_spans_mask: torch.Tensor = None,
                            encoded_spans_scores: torch.Tensor = None,
                            previous_attention_weights: torch.Tensor = None) -> Tuple[torch.Tensor,
@@ -375,11 +418,10 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         if encoded_spans is not None:
             # This means we want to attend over spans as well.
             # (group_size, num_spans)
-            question_span_attention_weights = self._input_attention(query,
-                                                                    encoded_spans,
-                                                                    encoded_spans_mask)
-            # Scaling using span scores.
-            question_span_attention_weights = question_span_attention_weights * encoded_spans_scores
+            question_span_attention_weights = self._compute_span_sum(question_attention_weights, span_indices)
+            if encoded_spans_scores is not None:
+                # Scaling using span scores.
+                question_span_attention_weights = question_span_attention_weights * encoded_spans_scores
             if self._use_structured_attention and previous_attention_weights is not None:
                 # Scaling using previous state's attention.
                 question_span_attention_weights = question_span_attention_weights * previous_attention_weights

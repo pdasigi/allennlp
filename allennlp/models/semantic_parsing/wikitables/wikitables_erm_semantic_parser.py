@@ -58,6 +58,9 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
     max_span_length : ``int``, optional
         If you want the decoder to attend on spans, this is the maximum length of the spans extracted.
         Passed to super class.
+    score_spans: ``bool``, optional (default=False)
+        If set, we will use a linear layer to score extracted spans. If no span extractor is provided this flag
+        will be ignored. Passed to the super class.
     mixture_feedforward : ``FeedForward``, optional (default=None)
         If given, we'll use this to compute a mixture probability between global actions and linked
         actions given the hidden state at every timestep of decoding, instead of concatenating the
@@ -110,6 +113,7 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
                  max_decoding_steps: int,
                  question_span_extractor: SpanExtractor = None,
                  max_span_length: int = None,
+                 score_spans: bool = False,
                  mixture_feedforward: FeedForward = None,
                  add_action_bias: bool = True,
                  normalize_beam_score_by_length: bool = False,
@@ -129,6 +133,7 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
                          max_decoding_steps=max_decoding_steps,
                          question_span_extractor=question_span_extractor,
                          max_span_length=max_span_length,
+                         score_spans=score_spans,
                          add_action_bias=add_action_bias,
                          use_neighbor_similarity_for_linking=use_similarity,
                          dropout=dropout,
