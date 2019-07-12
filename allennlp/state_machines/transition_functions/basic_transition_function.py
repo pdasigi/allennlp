@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Set, Tuple
 
 from overrides import overrides
 
-import numpy
 import torch
 from torch.nn.modules.rnn import LSTM, LSTMCell
 from torch.nn.modules.linear import Linear
@@ -346,40 +345,6 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                     new_states.append(make_state(group_index, action, log_prob, action_embedding))
         return new_states
 
-    @staticmethod
-    def _compute_span_sum(data: torch.Tensor,
-                          span_indices: torch.LongTensor) -> torch.Tensor:
-        """
-        Given a tensor with some data and another specifying span indices along that the final axis of the data
-        tensor, this function computes the sum of elements in the data tensor that belong to the spans identified
-        by the indices.
-
-        Parameters
-        ----------
-        data : ``torch.Tensor``
-            Tensor of shape ``(batch_size, num_elements)``
-        span_indices : ``torch.LongTensor``
-            Tensor of shape ``(batch_size, num_spans, 2)``, specifying start and end indices that are assumed to be
-            inclusive.
-
-        Returns
-        -------
-        summed_data : ``torch.Tensor``
-            Tensor of shape ``(batch_size, num_spans)``
-        """
-        batch_size, num_elements = data.shape
-        _, num_spans, _ = span_indices.shape
-        indices = span_indices.new(numpy.arange(num_elements))
-        # Tensor where each row is 0 ... num_elements - 1.
-        all_indices = indices.repeat(1, batch_size * num_spans).view(batch_size, num_spans, num_elements)
-
-        # Each tensor is of size (batch_size, num_spans, 1)
-        start_indices, end_indices = span_indices.split(1, -1)
-        mask = ((all_indices >= start_indices) * (all_indices <= end_indices)).float()
-        span_expanded_data = data.repeat(1, num_spans).view(batch_size, num_spans, num_elements)
-        summed_data = (span_expanded_data * mask).sum(-1)
-        return summed_data
-
     def attend_on_question(self,
                            query: torch.Tensor,
                            encoder_outputs: torch.Tensor,
@@ -412,7 +377,7 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         if encoded_spans is not None:
             # This means we want to attend over spans as well.
             # (group_size, num_spans)
-            question_span_attention_weights = self._compute_span_sum(question_attention_weights, span_indices)
+            question_span_attention_weights = util.sum_over_spans(question_attention_weights, span_indices)
             if encoded_spans_scores is not None:
                 # Scaling using span scores.
                 question_span_attention_weights = question_span_attention_weights * encoded_spans_scores

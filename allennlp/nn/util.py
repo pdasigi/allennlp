@@ -10,6 +10,7 @@ import math
 import json
 import numpy
 
+import numpy
 import torch
 
 from allennlp.common.checks import ConfigurationError
@@ -1031,6 +1032,40 @@ def _get_combination_dim(combination: str, tensor_dims: List[int]) -> int:
         if first_tensor_dim != second_tensor_dim:
             raise ConfigurationError("Tensor dims must match for operation \"{}\"".format(operation))
         return first_tensor_dim
+
+
+def sum_over_spans(data: torch.Tensor,
+                   span_indices: torch.LongTensor) -> torch.Tensor:
+    """
+    Given a tensor with some data and another specifying span indices along that the final axis of the data
+    tensor, this function computes the sum of elements in the data tensor that belong to the spans identified
+    by the indices.
+
+    Parameters
+    ----------
+    data : ``torch.Tensor``
+        Tensor of shape ``(batch_size, num_elements)``
+    span_indices : ``torch.LongTensor``
+        Tensor of shape ``(batch_size, num_spans, 2)``, specifying start and end indices that are assumed to be
+        inclusive.
+
+    Returns
+    -------
+    summed_data : ``torch.Tensor``
+        Tensor of shape ``(batch_size, num_spans)``
+    """
+    batch_size, num_elements = data.shape
+    _, num_spans, _ = span_indices.shape
+    indices = span_indices.new(numpy.arange(num_elements))
+    # Tensor where each row is 0 ... num_elements - 1.
+    all_indices = indices.repeat(1, batch_size * num_spans).view(batch_size, num_spans, num_elements)
+
+    # Each tensor is of size (batch_size, num_spans, 1)
+    start_indices, end_indices = span_indices.split(1, -1)
+    mask = ((all_indices >= start_indices) * (all_indices <= end_indices)).float()
+    span_expanded_data = data.repeat(1, num_spans).view(batch_size, num_spans, num_elements)
+    summed_data = (span_expanded_data * mask).sum(-1)
+    return summed_data
 
 
 def logsumexp(tensor: torch.Tensor,

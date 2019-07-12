@@ -1156,3 +1156,20 @@ class TestNnUtil(AllenNlpTestCase):
         assert moved_obj['b']._device == new_device
         assert moved_obj['c'][0] == 1
         assert moved_obj['c'][1]._device == new_device
+
+    def test_sum_over_spans(self):
+        data = torch.FloatTensor([[0.1, 0.2, 0.3, 0.4, 0.5],
+                                  [0.1, 0.2, 0.3, 0.4, 0.5],
+                                  [0.1, 0.2, 0.3, 0.4, 0.5],
+                                  [0.1, 0.2, 0.3, 0.4, 0.5]])
+        span_indices = torch.LongTensor([[[0, 0], [0, 2], [3, 4]],
+                                         [[1, 1], [0, 3], [0, 4]],
+                                         [[1, 2], [2, 2], [3, 3]],
+                                         [[2, 3], [0, 3], [1, 3]]])
+        summed_data = util.sum_over_spans(data, span_indices).data.numpy()
+        numpy.testing.assert_array_almost_equal(summed_data,
+                                                numpy.asarray([[0.1, 0.6, 0.9],
+                                                               [0.2, 1.0, 1.5],
+                                                               [0.5, 0.3, 0.4],
+                                                               [0.7, 1.0, 0.9]],
+                                                              dtype='float32'))
