@@ -79,7 +79,10 @@ class GrammarBasedState(State['GrammarBasedState']):
         batch_index = self.batch_indices[group_index]
         new_action_history = self.action_history[group_index] + [action]
         production_rule = self.possible_actions[batch_index][action][0]
-        new_grammar_state = self.grammar_state[group_index].take_action(production_rule)
+        additional_information = {"node_attention_weights":
+                                  attention_weights[group_index]} if attention_weights is not None else None
+        new_grammar_state = self.grammar_state[group_index].take_action(production_rule,
+                                                                        additional_information)
         if self.debug_info is not None:
             attention = attention_weights[group_index] if attention_weights is not None else None
             debug_info = {
@@ -112,6 +115,12 @@ class GrammarBasedState(State['GrammarBasedState']):
         Returns a list of valid actions for each element of the group.
         """
         return [state.get_valid_actions() for state in self.grammar_state]
+
+    def get_additional_grammar_state_information(self) -> List[Dict[str, Any]]:
+        """
+        Returns a list of additional information from each element if the group.
+        """
+        return [state.get_additional_information() for state in self.grammar_state]
 
     def is_finished(self) -> bool:
         if len(self.batch_indices) != 1:

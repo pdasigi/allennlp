@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Generic, List, TypeVar
+from typing import Callable, Dict, Generic, List, TypeVar, Any
 
 from allennlp.nn import util
 
@@ -24,10 +24,10 @@ class GrammarStatelet(Generic[ActionRepresentation]):
     Parameters
     ----------
     nonterminal_stack : ``List[str]``
-        Holds the list of non-terminals that still need to be expanded.  This starts out as
-        [START_SYMBOL], and decoding ends when this is empty.  Every time we take an action, we
-        update the non-terminal stack and the context-dependent valid actions, and we use what's on
-        the stack to decide which actions are valid in the current state.
+        Holds the list of non-terminals that still need to be expanded. This starts out as [START_SYMBOL], and
+        decoding ends when this is empty.  Every time we take an action, we update the non-terminal stack and the
+        context-dependent valid actions, and we use what's on the stack to decide which actions are valid in the
+        current state.
     valid_actions : ``Dict[str, ActionRepresentation]``
         A mapping from non-terminals (represented as strings) to all valid expansions of that
         non-terminal.  The class that constructs this object can pick how it wants the actions to
@@ -42,16 +42,23 @@ class GrammarStatelet(Generic[ActionRepresentation]):
         reversed, then the first non-terminal in the production will be popped off the stack first,
         giving us left-to-right production.  If this is ``False``, you will get right-to-left
         production.
+    additional_information: ``List[Dict[str, Any]]``, optional
+        This list is the same size as the nonterminal stack, and optionally holds any additional information
+        (as a dict) related to each non-terminal that could be useful for the transition function. If no additional
+        information is provided for some nonterminals, the elements corresponding to those elements will be
+        ``None``.
     """
     def __init__(self,
                  nonterminal_stack: List[str],
                  valid_actions: Dict[str, ActionRepresentation],
                  is_nonterminal: Callable[[str], bool],
-                 reverse_productions: bool = True) -> None:
+                 reverse_productions: bool = True,
+                 additional_information: List[Dict[str, Any]] = None) -> None:
         self._nonterminal_stack = nonterminal_stack
         self._valid_actions = valid_actions
         self._is_nonterminal = is_nonterminal
         self._reverse_productions = reverse_productions
+        self._additional_information = additional_information or [None]
 
     def is_finished(self) -> bool:
         """
@@ -67,7 +74,16 @@ class GrammarStatelet(Generic[ActionRepresentation]):
         """
         return self._valid_actions[self._nonterminal_stack[-1]]
 
-    def take_action(self, production_rule: str) -> 'GrammarStatelet':
+    def get_additional_information(self) -> Dict[str, Any]:
+        """
+        Returns the additional information associated with the next nonterminal on the stack that needs to be
+        expanded.
+        """
+        return self._additional_information[-1]
+
+    def take_action(self,
+                    production_rule: str,
+                    additional_information: Dict[str, Any] = None) -> 'GrammarStatelet':
         """
         Takes an action in the current grammar state, returning a new grammar state with whatever
         updates are necessary.  The production rule is assumed to be formatted as "LHS -> RHS".
@@ -85,10 +101,12 @@ class GrammarStatelet(Generic[ActionRepresentation]):
         popped off the stack `last`.
         """
         left_side, right_side = production_rule.split(' -> ')
-        assert self._nonterminal_stack[-1] == left_side, (f"Tried to expand {self._nonterminal_stack[-1]}"
-                                                          f"but got rule {left_side} -> {right_side}")
+        last_nonterminal = self._nonterminal_stack[-1]
+        assert last_nonterminal == left_side, (f"Tried to expand {last_nonterminal}"
+                                               f"but got rule {left_side} -> {right_side}")
 
         new_stack = self._nonterminal_stack[:-1]
+        new_additional_information_stack = self._additional_information[:-1]
 
         productions = self._get_productions_from_string(right_side)
         if self._reverse_productions:
@@ -97,11 +115,13 @@ class GrammarStatelet(Generic[ActionRepresentation]):
         for production in productions:
             if self._is_nonterminal(production):
                 new_stack.append(production)
+                new_additional_information_stack.append(additional_information)
 
         return GrammarStatelet(nonterminal_stack=new_stack,
                                valid_actions=self._valid_actions,
                                is_nonterminal=self._is_nonterminal,
-                               reverse_productions=self._reverse_productions)
+                               reverse_productions=self._reverse_productions,
+                               additional_information=new_additional_information_stack)
 
     @staticmethod
     def _get_productions_from_string(production_string: str) -> List[str]:
