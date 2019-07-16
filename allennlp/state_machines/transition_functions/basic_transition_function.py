@@ -380,16 +380,19 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
             # This means we want to attend over spans as well.
             # (group_size, num_spans)
             question_span_attention_weights = util.sum_over_spans(question_attention_weights, span_indices)
-            if encoded_spans_scores is not None:
-                # Scaling using span scores.
-                question_span_attention_weights = question_span_attention_weights * encoded_spans_scores
             if self._use_structured_attention and parent_attention_weights is not None:
                 # Scaling using parent's attention.
                 question_span_attention_weights = question_span_attention_weights * parent_attention_weights
+            if encoded_spans_scores is None:
+                # (group_size, span_output_dim)
+                span_based_attended_question = util.weighted_sum(encoded_spans, question_span_attention_weights)
+            else:
+                # Scaling using span scores before computing attended representation. Note that the attention
+                # weights themselves are not being changed. That's because if we are using structured attention, we
+                # do not want the span scores being multiplied multiple times for lower level nodels in the tree.
+                span_based_attended_question = util.weighted_sum(encoded_spans,
+                                                                 question_span_attention_weights *
+                                                                 encoded_spans_scores)
 
-            # Renormalizing
-            question_span_attention_weights = torch.nn.functional.softmax(question_span_attention_weights, -1)
-            # (group_size, span_output_dim)
-            span_based_attended_question = util.weighted_sum(encoded_spans, question_span_attention_weights)
         return (attended_question, question_attention_weights,
                 span_based_attended_question, question_span_attention_weights)
