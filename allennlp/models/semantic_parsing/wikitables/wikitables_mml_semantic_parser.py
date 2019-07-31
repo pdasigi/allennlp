@@ -56,6 +56,9 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
     score_spans: ``bool``, optional (default=False)
         If set, we will use a linear layer to score extracted spans. If no span extractor is provided this flag
         will be ignored. Passed to the super class.
+    use_constituents_only : ``bool`` (default=False)
+        If set and if using span attention, we'll use a constituency parser to gather only those spans that are
+        valid constituents instead of all possible spans. We will ignore ``max_span_length`` is this option is set.
     mixture_feedforward : ``FeedForward``, optional (default=None)
         If given, we'll use this to compute a mixture probability between global actions and linked
         actions given the hidden state at every timestep of decoding, instead of concatenating the
@@ -102,6 +105,7 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                  question_span_extractor: SpanExtractor = None,
                  max_span_length: int = None,
                  score_spans: bool = False,
+                 use_constituents_only: bool = False,
                  mixture_feedforward: FeedForward = None,
                  add_action_bias: bool = True,
                  training_beam_size: int = None,
@@ -120,6 +124,7 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                          question_span_extractor=question_span_extractor,
                          max_span_length=max_span_length,
                          score_spans=score_spans,
+                         use_constituents_only=use_constituents_only,
                          add_action_bias=add_action_bias,
                          use_neighbor_similarity_for_linking=use_similarity,
                          dropout=dropout,
