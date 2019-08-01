@@ -817,7 +817,7 @@ class WikiTablesSemanticParser(Model):
         if metadata is not None:
             all_question_tokens = [x["question_tokens"] for x in metadata]
             outputs["question_tokens"] = all_question_tokens
-            if self._max_span_length is not None:
+            if self._max_span_length is not None or self._constituency_parser is not None:
                 # This means we encoded spans, and the decoder attended to them.
                 outputs["question_spans"] = [self._get_span_strings_from_tokens(question_tokens) for
                                              question_tokens in all_question_tokens]

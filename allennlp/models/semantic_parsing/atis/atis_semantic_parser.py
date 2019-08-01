@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 import difflib
 import sqlparse
 from overrides import overrides
+import numpy
 import torch
 
 from allennlp.common.util import pad_sequence_to_length
@@ -12,6 +13,7 @@ from allennlp.data.fields.production_rule_field import ProductionRule
 from allennlp.semparse.executors import SqlExecutor
 from allennlp.models.model import Model
 from allennlp.modules import Attention, Seq2SeqEncoder, TextFieldEmbedder, Embedding
+from allennlp.modules.span_extractors import SpanExtractor
 from allennlp.nn import util
 from allennlp.semparse.worlds import AtisWorld
 from allennlp.semparse.contexts.atis_sql_table_context import NUMERIC_NONTERMINALS
@@ -46,6 +48,18 @@ class AtisSemanticParser(Model):
     input_attention: ``Attention``
         We compute an attention over the input utterance at each step of the decoder, using the
         decoder hidden state as the query.  Passed to the transition function.
+    utterance_span_extractor : ``SpanExtractor``, optional
+        If you want the decoder to attend on spans instead of tokens, you pass a SpanExtractor here.
+        Passed to super class.
+    max_span_length : ``int``, optional
+        If you want the decoder to attend on spans, this is the maximum length of the spans extracted.
+        Passed to super class.
+    score_spans: ``bool``, optional (default=False)
+        If set, we will use a linear layer to score extracted spans. If no span extractor is provided this flag
+        will be ignored. Passed to the super class.
+    use_constituents_only : ``bool`` (default=False)
+        If set and if using span attention, we'll use a constituency parser to gather only those spans that are
+        valid constituents instead of all possible spans. We will ignore ``max_span_length`` is this option is set.
     add_action_bias : ``bool``, optional (default=True)
         If ``True``, we will learn a bias weight for each action that gets used when predicting
         that action, in addition to its embedding.
@@ -67,6 +81,10 @@ class AtisSemanticParser(Model):
                  decoder_beam_search: BeamSearch,
                  max_decoding_steps: int,
                  input_attention: Attention,
+                 utterance_span_extractor: SpanExtractor = None,
+                 max_span_length: int = None,
+                 score_spans: bool = False,
+                 use_constituents_only: bool = False,
                  add_action_bias: bool = True,
                  training_beam_size: int = None,
                  decoder_num_layers: int = 1,
@@ -77,6 +95,20 @@ class AtisSemanticParser(Model):
         super().__init__(vocab)
         self._utterance_embedder = utterance_embedder
         self._encoder = encoder
+        self._utterance_span_extractor = utterance_span_extractor
+        self._span_scorer = None
+        if self._utterance_span_extractor is not None and score_spans:
+            span_extractor_dim = self._utterance_span_extractor.get_output_dim()
+            if self._encoder.get_output_dim() != span_extractor_dim:
+                raise RuntimeError("""We use the same attention function for linked and embedded actions.
+                                   Linked actions attend to tokens, and embedded actions attend to spans. So the output
+                                   dimensionalities of the encoder and the span extractor need to be the same.""")
+            self._span_scorer = torch.nn.Linear(span_extractor_dim, 1)
+        self._constituency_parser = None
+        if use_constituents_only:
+            from allennlp.pretrained import span_based_constituency_parsing_with_elmo_joshi_2018
+            self._constituency_parser = span_based_constituency_parsing_with_elmo_joshi_2018()
+        self._max_span_length = max_span_length
         self._max_decoding_steps = max_decoding_steps
         self._add_action_bias = add_action_bias
         if dropout > 0:
@@ -241,7 +273,29 @@ class AtisSemanticParser(Model):
                 outputs['best_action_sequence'].append(action_strings)
                 outputs['predicted_sql_query'].append(sqlparse.format(predicted_sql_query, reindent=True))
                 outputs['debug_info'].append(best_final_states[i][0].debug_info[0])  # type: ignore
+
+            if self._max_span_length is not None or self._constituency_parser is not None:
+                # This means we encoded spans, and the decoder attended to them.
+                outputs["utterance_spans"] = [self._get_span_strings_from_tokens(tokens) for
+                                              tokens in outputs["tokenized_utterance"]]
+
             return outputs
+
+    def _get_span_strings_from_tokens(self, tokens: List[str]) -> List[str]:
+        span_strings: List[str] = []
+        if self._constituency_parser is None:
+            max_span_length = min(self._max_span_length, len(tokens))
+            for i in range(len(tokens)):
+                for j in range(i + 1, i + max_span_length + 1):
+                    if j > len(tokens):
+                        break
+                    span_strings.append(" ".join(tokens[i:j]))
+        else:
+            valid_spans = self._get_valid_span_indices(tokens)
+            span_strings.extend(tokens)
+            for start, end in valid_spans:
+                span_strings.append(" ".join(tokens[start:end + 1]))
+        return span_strings
 
     def _get_initial_state(self,
                            utterance: Dict[str, torch.LongTensor],
@@ -278,6 +332,29 @@ class AtisSemanticParser(Model):
         initial_score_list = [initial_score[i] for i in range(batch_size)]
         encoder_output_list = [encoder_outputs[i] for i in range(batch_size)]
         utterance_mask_list = [utterance_mask[i] for i in range(batch_size)]
+        encoded_spans_scores = None
+        encoded_spans_scores_list = None
+        if self._utterance_span_extractor is None:
+            encoded_spans_list = None
+            span_indices_mask_list = None
+        else:
+            tokens: List[List[str]] = []
+            for instance_indices in utterance["tokens"].detach().cpu():
+                tokens.append([])
+                for index in instance_indices:
+                    token = self.vocab.get_token_from_index(int(index))
+                    if token != "@@PADDING@@":
+                        tokens[-1].append(token)
+            # (batch_size, num_spans, span_embedding_dim)
+            encoder_output_spans, span_indices_mask = self._get_encoder_output_spans(encoder_outputs,
+                                                                                     utterance_mask,
+                                                                                     tokens)
+            encoded_spans_list = [encoder_output_spans[i] for i in range(batch_size)]
+            span_indices_mask_list = [span_indices_mask[i] for i in range(batch_size)]
+            if self._span_scorer is not None:
+                # (batch_size, num_spans)
+                encoded_spans_scores = torch.sigmoid(self._span_scorer(encoder_output_spans).squeeze(-1))
+                encoded_spans_scores_list = [encoded_spans_scores[i] for i in range(batch_size)]
         initial_rnn_state = []
         for i in range(batch_size):
             if self._decoder_num_layers > 1:
@@ -286,7 +363,10 @@ class AtisSemanticParser(Model):
                                                      self._first_action_embedding,
                                                      self._first_attended_utterance,
                                                      encoder_output_list,
-                                                     utterance_mask_list))
+                                                     utterance_mask_list,
+                                                     encoded_spans_list,
+                                                     span_indices_mask_list,
+                                                     encoded_spans_scores_list))
             else:
                 initial_rnn_state.append(RnnStatelet(final_encoder_output[i],
                                                      memory_cell[i],
@@ -310,6 +390,72 @@ class AtisSemanticParser(Model):
                                           possible_actions=actions,
                                           debug_info=None)
         return initial_state
+
+    def _get_valid_span_indices(self,
+                                tokens: List[str]) -> List[Tuple[int]]:
+        sentence = " ".join(tokens)
+        parser_prediction = self._constituency_parser.predict(sentence)
+        span_indices = parser_prediction["spans"]
+        all_probabilities = parser_prediction["class_probabilities"]
+        # We want those spans whose label is not "NO-LABEL". For that, we need to access the model's vocabulary to
+        # get the corresponding label index.
+        parser_model = self._constituency_parser._model  # pylint: disable=protected-access
+        no_label_index = parser_model.vocab.get_token_index("NO-LABEL", "labels")
+        valid_span_indices = []
+        for indices, probabilities in zip(span_indices, all_probabilities):
+            if indices[0] == indices[1]:
+                # We do not want single token indices. They will be added to the list of span indices anyway.
+                continue
+            max_probability_index = numpy.argmax(probabilities)
+            if max_probability_index != no_label_index:
+                valid_span_indices.append(indices)
+        return valid_span_indices
+
+    def _get_encoder_output_spans(self,
+                                  encoder_output: torch.Tensor,
+                                  utterance_mask: torch.Tensor,
+                                  tokens: List[List[str]]) -> Tuple[torch.FloatTensor,
+                                                                    torch.LongTensor]:
+        batch_size, sequence_length, _ = encoder_output.shape
+        max_span_length = min(self._max_span_length, sequence_length)
+        span_indices = []
+        for i in range(batch_size):
+            span_indices.append([])
+            instance_mask = utterance_mask[i].detach().cpu()
+            if self._constituency_parser is not None:
+                # This means we will only consider spans that are valid constituents.
+                valid_spans = self._get_valid_span_indices(tokens[i])
+                # We add single token spans here.
+                for span_begin, token_mask in enumerate(instance_mask):
+                    if token_mask == 1:
+                        span_indices[-1].append((span_begin, span_begin))
+                # Assuming right-padding, and not adjusting valid span indices.
+                span_indices[-1].extend(valid_spans)
+            else:
+                # Span indices are inclusive.
+                for span_begin in range(sequence_length):
+                    for span_end in range(span_begin, min(span_begin + max_span_length, sequence_length)):
+                        span_begin_mask = instance_mask[span_begin]
+                        span_end_mask = instance_mask[span_end]
+                        if span_begin_mask == 1 and span_end_mask == 1:
+                            # Add span indices only if both begin and end are out of padding.
+                            span_indices[-1].append([span_begin, span_end])
+
+        # Padding span indices to the same length
+        span_indices_mask = []
+        max_num_spans = max([len(indices) for indices in span_indices])
+        for indices in span_indices:
+            num_spans = len(indices)
+            span_indices_mask.append([1] * num_spans)
+            if num_spans < max_num_spans:
+                indices.extend([[-1, -1]] * (max_num_spans - num_spans))
+                span_indices_mask[-1].extend([0] * (max_num_spans - num_spans))
+        span_indices_tensor = encoder_output.new_tensor(span_indices, dtype=torch.long)
+        span_indices_mask_tensor = encoder_output.new_tensor(span_indices_mask, dtype=torch.long)
+        encoder_output_spans = self._utterance_span_extractor(sequence_tensor=encoder_output,
+                                                              span_indices=span_indices_tensor,
+                                                              span_indices_mask=span_indices_mask_tensor)
+        return encoder_output_spans, span_indices_mask_tensor
 
     @staticmethod
     def _get_type_vector(worlds: List[AtisWorld],
