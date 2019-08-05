@@ -37,6 +37,7 @@
     "max_span_length": 5,
     "score_spans": true,
     "use_constituents_only": true,
+    "discard_encoder_final_state": true,
     "decoder_beam_search": {
     "beam_size": 5
     },
