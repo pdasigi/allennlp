@@ -89,7 +89,7 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
         The vocabulary namespace to use for production rules.  The default corresponds to the
         default used in the dataset reader, so you likely don't need to modify this. Passed to super
         class.
-    use_structured_attention : ``bool``, optional (default=False)
+    use_parent_gating : ``bool``, optional (default=False)
         If set, we will condition the attention in the transition function on that for predicting the parent node.
         Passed to the super class.
     """
@@ -113,7 +113,7 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                  dropout: float = 0.0,
                  num_linking_features: int = 10,
                  rule_namespace: str = 'rule_labels',
-                 use_structured_attention: bool = False) -> None:
+                 use_parent_gating: bool = False) -> None:
         use_similarity = use_neighbor_similarity_for_linking
         super().__init__(vocab=vocab,
                          question_embedder=question_embedder,
@@ -130,7 +130,7 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                          dropout=dropout,
                          num_linking_features=num_linking_features,
                          rule_namespace=rule_namespace,
-                         use_structured_attention=use_structured_attention)
+                         use_parent_gating=use_parent_gating)
         self._beam_search = decoder_beam_search
         self._decoder_trainer = MaximumMarginalLikelihood(training_beam_size)
         self._decoder_step = LinkingTransitionFunction(encoder_output_dim=self._encoder.get_output_dim(),
@@ -139,7 +139,7 @@ class WikiTablesMmlSemanticParser(WikiTablesSemanticParser):
                                                        add_action_bias=self._add_action_bias,
                                                        mixture_feedforward=mixture_feedforward,
                                                        dropout=dropout,
-                                                       use_structured_attention=self._use_structured_attention)
+                                                       use_parent_gating=self._use_parent_gating)
 
     @overrides
     def forward(self,  # type: ignore

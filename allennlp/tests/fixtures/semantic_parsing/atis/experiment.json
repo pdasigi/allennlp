@@ -38,6 +38,7 @@
     "score_spans": true,
     "use_constituents_only": true,
     "discard_encoder_final_state": true,
+    "use_parent_gating": true,
     "decoder_beam_search": {
     "beam_size": 5
     },

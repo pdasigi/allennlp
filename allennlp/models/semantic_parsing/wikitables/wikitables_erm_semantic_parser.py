@@ -100,7 +100,7 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
     mml_model_file : ``str``, optional (default=None)
         If you want to initialize this model using weights from another model trained using MML,
         pass the path to the ``model.tar.gz`` file of that model here.
-    use_structured_attention : ``bool``, optional (default=False)
+    use_parent_gating : ``bool``, optional (default=False)
         If set, we will condition the attention in the transition function on that for predicting the parent node.
         Passed to the super class.
     """
@@ -127,7 +127,7 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
                  num_linking_features: int = 10,
                  rule_namespace: str = 'rule_labels',
                  mml_model_file: str = None,
-                 use_structured_attention: bool = False) -> None:
+                 use_parent_gating: bool = False) -> None:
         use_similarity = use_neighbor_similarity_for_linking
         super().__init__(vocab=vocab,
                          question_embedder=question_embedder,
@@ -144,7 +144,7 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
                          dropout=dropout,
                          num_linking_features=num_linking_features,
                          rule_namespace=rule_namespace,
-                         use_structured_attention=use_structured_attention)
+                         use_parent_gating=use_parent_gating)
         # Not sure why mypy needs a type annotation for this!
         self._decoder_trainer: ExpectedRiskMinimization = \
                 ExpectedRiskMinimization(beam_size=decoder_beam_size,
@@ -157,7 +157,7 @@ class WikiTablesErmSemanticParser(WikiTablesSemanticParser):
                                                                add_action_bias=self._add_action_bias,
                                                                mixture_feedforward=mixture_feedforward,
                                                                dropout=dropout,
-                                                               use_structured_attention=self._use_structured_attention)  # pylint: disable=line-too-long
+                                                               use_parent_gating=self._use_parent_gating)  # pylint: disable=line-too-long
         self._checklist_cost_weight = checklist_cost_weight
         self._agenda_coverage = Average()
         # We don't need a separate beam search since the trainer does that already. But we're defining one just to

@@ -41,7 +41,7 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
     dropout : ``float`` (optional, default=0.0)
     num_layers: ``int``, (optional, default=1)
         The number of layers in the decoder LSTM.
-    use_structured_attention: ``bool``, (optional, default=False)
+    use_parent_gating: ``bool``, (optional, default=False)
         If set, we will use a gate to update the attention over the question for the given node based on that for
         its parent node.
     """
@@ -53,13 +53,13 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                  add_action_bias: bool = True,
                  dropout: float = 0.0,
                  num_layers: int = 1,
-                 use_structured_attention: bool = False) -> None:
+                 use_parent_gating: bool = False) -> None:
         super().__init__()
         self._input_attention = input_attention
         self._add_action_bias = add_action_bias
         self._activation = activation
         self._num_layers = num_layers
-        self._use_structured_attention = use_structured_attention
+        self._use_parent_gating = use_parent_gating
 
         # Decoder output dim needs to be the same as the encoder output dim since we initialize the
         # hidden state of the decoder with the final hidden state of the encoder.
@@ -159,13 +159,19 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
         else:
             encoded_spans_scores = None
 
+        if state.rnn_state[0].child_span_mask is not None:
+            # (group_size, num_spans, num_spans)
+            child_span_mask = torch.stack([state.rnn_state[0].child_span_mask[i] for i in state.batch_indices])
+        else:
+            child_span_mask = None
+
         if self._num_layers > 1:
             hidden_state_for_attention = hidden_state[-1]
         else:
             hidden_state_for_attention = hidden_state
 
         parent_attention_weights = None
-        if self._use_structured_attention:
+        if self._use_parent_gating:
             additional_grammar_state_information = state.get_additional_grammar_state_information()
             # For the first action, since there are no parents, the parent attention weights are non-existent.
             if not all([info is None for info in additional_grammar_state_information]):
@@ -179,7 +185,8 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                                  encoded_spans,
                                                  encoded_spans_mask,
                                                  encoded_spans_scores,
-                                                 parent_attention_weights)
+                                                 parent_attention_weights,
+                                                 child_span_mask)
         attended_question, attention_weights, span_attended_question, span_attention_weights = attention_info
         if span_attended_question is None:
             action_query = torch.cat([hidden_state_for_attention, attended_question], dim=-1)
@@ -289,7 +296,8 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                                         state.rnn_state[group_index].encoder_output_mask,
                                         state.rnn_state[group_index].encoded_spans,
                                         state.rnn_state[group_index].encoded_spans_mask,
-                                        state.rnn_state[group_index].encoded_spans_scores)
+                                        state.rnn_state[group_index].encoded_spans_scores,
+                                        state.rnn_state[group_index].child_span_mask)
             batch_index = state.batch_indices[group_index]
             for i, _, current_log_probs, _, actions in batch_action_probs[batch_index]:
                 if i == group_index:
@@ -355,10 +363,11 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
                            encoded_spans: torch.Tensor = None,
                            encoded_spans_mask: torch.Tensor = None,
                            encoded_spans_scores: torch.Tensor = None,
-                           parent_attention_weights: torch.Tensor = None) -> Tuple[torch.Tensor,
-                                                                                   torch.Tensor,
-                                                                                   torch.Tensor,
-                                                                                   torch.Tensor]:
+                           parent_attention_weights: torch.Tensor = None,
+                           child_span_mask: torch.Tensor = None) -> Tuple[torch.Tensor,
+                                                                          torch.Tensor,
+                                                                          torch.Tensor,
+                                                                          torch.Tensor]:
         """
         Given a query (which is typically the decoder hidden state), compute an attention over the
         output of the question encoder, and return a weighted sum of the question representations
@@ -384,9 +393,23 @@ class BasicTransitionFunction(TransitionFunction[GrammarBasedState]):
             question_span_attention_weights = self._input_attention(query,
                                                                     encoded_spans,
                                                                     encoded_spans_mask)
-            if self._use_structured_attention and parent_attention_weights is not None:
+            if self._use_parent_gating and parent_attention_weights is not None:
+                # (group_size, num_spans, 1)
+                parent_attention_weights = parent_attention_weights.unsqueeze(-1)
+                # (group_size, num_spans, num_spans) where (i, j)th value for each group element is the attention
+                # given by the parent of this node to the ith span if i is the direct super-span of j,
+                # or 0 otherwise.
+                child_distributed_attention = parent_attention_weights * child_span_mask.float()
+                # Summing over rows. The ith value in the vector for each group element is the attention the parent
+                # of this node gave to the direct super-span of i.
+                # (group_size, num_spans)
+                child_prior = child_distributed_attention.sum(dim=1)
                 # Scaling using parent's attention.
-                question_span_attention_weights = question_span_attention_weights * parent_attention_weights
+                question_span_attention_weights = question_span_attention_weights * child_prior
+                # (group_size, 1)
+                weight_sums = question_span_attention_weights.sum(1).unsqueeze(-1)
+                # Renormalizing while adding a fuzz factor to the denominator to avoid nans.
+                question_span_attention_weights = question_span_attention_weights / (weight_sums + 1e-4)
             if encoded_spans_scores is None:
                 # (group_size, span_output_dim)
                 span_based_attended_question = util.weighted_sum(encoded_spans, question_span_attention_weights)

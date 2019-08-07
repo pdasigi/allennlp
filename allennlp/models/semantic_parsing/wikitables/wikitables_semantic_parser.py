@@ -77,7 +77,7 @@ class WikiTablesSemanticParser(Model):
     rule_namespace : ``str``, optional (default=rule_labels)
         The vocabulary namespace to use for production rules.  The default corresponds to the
         default used in the dataset reader, so you likely don't need to modify this.
-    use_structured_attention: ``bool``, optional (default=False)
+    use_parent_gating: ``bool``, optional (default=False)
         If set, we will update the attention over the question while predicting a production conditioned on the one
         used for predicting the parent node.
     """
@@ -98,7 +98,7 @@ class WikiTablesSemanticParser(Model):
                  dropout: float = 0.0,
                  num_linking_features: int = 10,
                  rule_namespace: str = 'rule_labels',
-                 use_structured_attention: bool = False) -> None:
+                 use_parent_gating: bool = False) -> None:
         super().__init__(vocab)
         self._question_embedder = question_embedder
         self._encoder = encoder
@@ -164,7 +164,7 @@ class WikiTablesSemanticParser(Model):
         else:
             self._question_entity_params = None
             self._question_neighbor_params = None
-        self._use_structured_attention = use_structured_attention
+        self._use_parent_gating = use_parent_gating
 
     def _get_initial_rnn_and_grammar_state(self,
                                            question: Dict[str, torch.LongTensor],

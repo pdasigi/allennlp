@@ -56,6 +56,9 @@ class RnnStatelet:
         Not all spans are created equal. These scores indicate the goodness of spans. Required only if you are
         encoding spans, and the expected length of the list is ``batch_size``, with each item of shape
         ``(num_spans,)``.
+    child_span_mask : ``List[torch.Tensor]``, optional
+        List of length batch size, with each element being a matrix of size ``(num_spans, num_spans)``, where
+        element ``(i, j)`` is 1 iff span ``i`` is a parent of span ``j``.
     """
     def __init__(self,
                  hidden_state: torch.Tensor,
@@ -66,7 +69,8 @@ class RnnStatelet:
                  encoder_output_mask: List[torch.Tensor],
                  encoded_spans: List[torch.Tensor] = None,
                  encoded_spans_mask: List[torch.Tensor] = None,
-                 encoded_spans_scores: List[torch.Tensor] = None) -> None:
+                 encoded_spans_scores: List[torch.Tensor] = None,
+                 child_span_mask: List[torch.Tensor] = None) -> None:
         self.hidden_state = hidden_state
         self.memory_cell = memory_cell
         self.previous_action_embedding = previous_action_embedding
@@ -76,6 +80,7 @@ class RnnStatelet:
         self.encoded_spans = encoded_spans
         self.encoded_spans_mask = encoded_spans_mask
         self.encoded_spans_scores = encoded_spans_scores
+        self.child_span_mask = child_span_mask
 
     def __eq__(self, other):
         if isinstance(self, other.__class__):
@@ -90,5 +95,6 @@ class RnnStatelet:
                     util.tensors_equal(self.encoded_spans, other.encoded_spans, tolerance=1e-5),
                     util.tensors_equal(self.encoded_spans_mask, other.encoded_spans_mask, tolerance=1e-5),
                     util.tensors_equal(self.encoded_spans_scores, other.encoded_spans_scores, tolerance=1e-5),
+                    util.tensors_equal(self.child_span_mask, other.child_span_mask, tolerance=1e-5),
                     ])
         return NotImplemented
