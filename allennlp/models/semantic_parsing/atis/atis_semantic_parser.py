@@ -443,6 +443,7 @@ class AtisSemanticParser(Model):
                                   encoder_output: torch.Tensor,
                                   utterance_mask: torch.Tensor,
                                   tokens: List[List[str]]) -> Tuple[torch.FloatTensor,
+                                                                    torch.LongTensor,
                                                                     torch.LongTensor]:
         batch_size, sequence_length, _ = encoder_output.shape
         max_span_length = min(self._max_span_length, sequence_length)

@@ -30,7 +30,7 @@
       "combination": "x-y"
     },
     "max_span_length": 3,
-    "use_structured_attention": false,
+    "use_parent_gating": true,
     "use_constituents_only": true,
     "entity_encoder": {
       "type": "boe",

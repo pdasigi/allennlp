@@ -8,6 +8,7 @@ from allennlp.common.checks import check_dimensions_match
 from allennlp.common.util import pad_sequence_to_length
 from allennlp.data import Vocabulary
 from allennlp.data.fields.production_rule_field import ProductionRuleArray
+from allennlp.models.semantic_parsing import util as semparse_util
 from allennlp.models.model import Model
 from allennlp.modules import Embedding, Seq2SeqEncoder, Seq2VecEncoder, TextFieldEmbedder, TimeDistributed
 from allennlp.modules.seq2vec_encoders import BagOfEmbeddingsEncoder
@@ -310,6 +311,7 @@ class WikiTablesSemanticParser(Model):
         encoder_output_mask_list = [question_mask[i] for i in range(batch_size)]
         encoded_spans_scores = None
         encoded_spans_scores_list = None
+        child_span_mask_list = None
         if self._question_span_extractor is None:
             encoded_spans_list = None
             span_indices_mask_list = None
@@ -322,15 +324,16 @@ class WikiTablesSemanticParser(Model):
                     if token != "@@PADDING@@":
                         tokens[-1].append(token)
             # (batch_size, num_spans, span_embedding_dim)
-            encoder_output_spans, span_indices_mask = self._get_encoder_output_spans(encoder_outputs,
-                                                                                     question_mask,
-                                                                                     tokens)
+            encoder_output_spans, span_indices_mask, child_span_mask = self._get_encoder_output_spans(
+                    encoder_outputs, question_mask, tokens)
             encoded_spans_list = [encoder_output_spans[i] for i in range(batch_size)]
             span_indices_mask_list = [span_indices_mask[i] for i in range(batch_size)]
             if self._span_scorer is not None:
                 # (batch_size, num_spans)
                 encoded_spans_scores = torch.sigmoid(self._span_scorer(encoder_output_spans).squeeze(-1))
                 encoded_spans_scores_list = [encoded_spans_scores[i] for i in range(batch_size)]
+            if self._use_parent_gating:
+                child_span_mask_list = [child_span_mask[i] for i in range(batch_size)]
         initial_rnn_state = []
         for i in range(batch_size):
             initial_rnn_state.append(RnnStatelet(final_encoder_output[i],
@@ -341,7 +344,8 @@ class WikiTablesSemanticParser(Model):
                                                  encoder_output_mask_list,
                                                  encoded_spans_list,
                                                  span_indices_mask_list,
-                                                 encoded_spans_scores_list))
+                                                 encoded_spans_scores_list,
+                                                 child_span_mask_list))
         initial_grammar_state = [self._create_grammar_state(world[i],
                                                             actions[i],
                                                             linking_scores[i],
@@ -360,7 +364,8 @@ class WikiTablesSemanticParser(Model):
 
     def _get_valid_span_indices(self,
                                 tokens: List[str]) -> List[Tuple[int]]:
-        sentence = " ".join(tokens)
+        # TODO(pradeep): Removing space before apostraphe. This is a hack to deal with words like "I'm".
+        sentence = " ".join(tokens).replace(" '", "'")
         parser_prediction = self._constituency_parser.predict(sentence)
         span_indices = parser_prediction["spans"]
         all_probabilities = parser_prediction["class_probabilities"]
@@ -382,6 +387,7 @@ class WikiTablesSemanticParser(Model):
                                   encoder_output: torch.Tensor,
                                   question_mask: torch.Tensor,
                                   tokens: List[List[str]]) -> Tuple[torch.FloatTensor,
+                                                                    torch.LongTensor,
                                                                     torch.LongTensor]:
         batch_size, sequence_length, _ = encoder_output.shape
         max_span_length = min(self._max_span_length, sequence_length)
@@ -417,12 +423,18 @@ class WikiTablesSemanticParser(Model):
             if num_spans < max_num_spans:
                 indices.extend([[-1, -1]] * (max_num_spans - num_spans))
                 span_indices_mask[-1].extend([0] * (max_num_spans - num_spans))
+
+        child_span_mask_tensor = None
+        if self._use_parent_gating:
+            child_span_mask = [semparse_util.get_child_span_mask(indices) for indices in span_indices]
+            # (batch_size, num_spans, num_spans)
+            child_span_mask_tensor = encoder_output.new_tensor(child_span_mask, dtype=torch.long)
         span_indices_tensor = encoder_output.new_tensor(span_indices, dtype=torch.long)
         span_indices_mask_tensor = encoder_output.new_tensor(span_indices_mask, dtype=torch.long)
         encoder_output_spans = self._question_span_extractor(sequence_tensor=encoder_output,
                                                              span_indices=span_indices_tensor,
                                                              span_indices_mask=span_indices_mask_tensor)
-        return encoder_output_spans, span_indices_mask_tensor
+        return encoder_output_spans, span_indices_mask_tensor, child_span_mask_tensor
 
     @staticmethod
     def _get_neighbor_indices(worlds: List[WikiTablesLanguage],
