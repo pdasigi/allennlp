@@ -426,7 +426,8 @@ class WikiTablesSemanticParser(Model):
 
         child_span_mask_tensor = None
         if self._use_parent_gating:
-            child_span_mask = [semparse_util.get_child_span_mask(indices) for indices in span_indices]
+            child_span_mask = [semparse_util.get_child_span_mask(indices, include_self=True)
+                               for indices in span_indices]
             # (batch_size, num_spans, num_spans)
             child_span_mask_tensor = encoder_output.new_tensor(child_span_mask, dtype=torch.long)
         span_indices_tensor = encoder_output.new_tensor(span_indices, dtype=torch.long)
